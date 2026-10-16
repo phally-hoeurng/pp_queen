@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Shop</title>
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <section class="contact-card" aria-label="PP Queen contact and social information">
+      <div class="contact-card-copy">
+        <span class="eyebrow">Connect with us</span>
+        <h2>PP Queen Contact</h2>
+        <p>Contact us about orders, delivery, payment or products.</p>
+        <div class="contact-banner-grid">
+          <div class="contact-banner social-banner" id="facebook-banner">
+            <span class="social-mark facebook-mark" aria-hidden="true">f</span>
+            <div><h3>Facebook Page</h3><p>Follow PP Queen for new products and updates.</p><a class="contact-social-link" id="facebook-link" href="#facebook" target="_blank" rel="noopener">Open Facebook Page</a></div>
+          </div>
+          <div class="contact-banner social-banner" id="telegram-banner">
+            <span class="social-mark telegram-mark" aria-hidden="true">➤</span>
+            <div><h3>Telegram Group</h3><p>Join for updates and product announcements.</p><a class="contact-social-link" id="telegram-link" href="#telegram" target="_blank" rel="noopener">Open Telegram Group</a></div>
+          </div>
+        </div>
+        <div class="contact-details" id="contact-details"></div>
+      </div>
+      <div class="contact-qr-wrap">
+        <img class="contact-qr contact-qr-large contact-logo-large" src="/images/logo-en.png" data-lang-logo alt="PP Queen logo">
+        <span>PP Queen</span>
+        <small>Our official shop and customer contact point.</small>
+      </div>
+    </section>
+
+    <h2 id="products">Products</h2>
+    <div class="filters">
+      <input id="search" type="search" placeholder="Search products" aria-label="Search products">
+      <select id="category" aria-label="Category">
+        <option value="">All categories</option>
+      </select>
+      <select id="sort" aria-label="Sort">
+        <option value="">Newest first</option>
+        <option value="price_asc">Price: low to high</option>
+        <option value="price_desc">Price: high to low</option>
+      </select>
+    </div>
+    <div id="grid" class="grid"></div>
+    <nav id="products-pagination" class="pagination" aria-label="Product pages"></nav>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    const grid = document.getElementById('grid');
+    const pageSize = 20;
+    let timer, allProducts = [], currentPage = 1;
+    const skeleton = () => Array.from({ length: 8 }, () => '<div class="card skel" aria-hidden="true"><div class="thumb"></div><div class="info"><span class="l w40"></span><span class="l w80"></span><span class="l w50"></span></div></div>').join('');
+    function paginationHTML(total, page) {
+      const pages = Math.ceil(total / pageSize);
+      if (pages <= 1) return '';
+      const start = Math.max(1, page - 2), end = Math.min(pages, page + 2);
+      let buttons = '<button type="button" class="page-btn" data-page="' + (page - 1) + '"' + (page === 1 ? ' disabled' : '') + '>Previous</button>';
+      if (start > 1) buttons += '<button type="button" class="page-btn" data-page="1">1</button><span class="page-ellipsis">…</span>';
+      for (let n = start; n <= end; n++) buttons += '<button type="button" class="page-btn ' + (n === page ? 'active' : '') + '" data-page="' + n + '" aria-current="' + (n === page ? 'page' : 'false') + '">' + n + '</button>';
+      if (end < pages) buttons += '<span class="page-ellipsis">…</span><button type="button" class="page-btn" data-page="' + pages + '">' + pages + '</button>';
+      buttons += '<span class="page-count">Page ' + page + ' of ' + pages + '</span><button type="button" class="page-btn" data-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + '>Next</button>';
+      return buttons;
+    }
+    function renderProducts() {
+      const pager = document.getElementById('products-pagination');
+      if (!allProducts.length) { grid.innerHTML = '<div class="empty" style="grid-column:1/-1">No products found. Try another search.</div>'; pager.innerHTML = ''; return; }
+      const pages = Math.max(1, Math.ceil(allProducts.length / pageSize));
+      currentPage = Math.min(Math.max(1, currentPage), pages);
+      const visible = allProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+      grid.innerHTML = visible.map((p) =>
+        '<article class="card">' +
+        '<a class="thumb thumb-link" href="/product.html?id=' + p.id + '" aria-label="View ' + PP.esc(p.name) + '">' + (p.image ? '<img loading="lazy" src="' + p.image + '" alt="' + PP.esc(p.name) + '">' : PP.placeholder) + '<span class="id-tag">' + PP.esc(PP.code(p)) + '</span></a>' +
+        '<div class="info">' +
+        '<span class="name">' + PP.esc(p.name) + '</span>' +
+        '<span class="price">' + PP.money(p.price) + '</span>' +
+        (p.stock <= 0 ? '<span class="badge bad">Sold out</span>' : p.stock <= 3 ? '<span class="badge warn">Only ' + p.stock + ' left</span>' : '') +
+        '<div class="card-actions">' +
+        (p.stock > 0 ? '<button type="button" class="quick-add' + (PP.inCart(p.id) ? ' in-cart' : '') + '" data-add="' + p.id + '">' + PP.addBtnHtml(p.id) + '</button>' : '<button type="button" class="quick-add" disabled>Sold out</button>') +
+        '<a class="btn ghost card-view" href="/product.html?id=' + p.id + '">View product</a>' +
+        '</div></div></article>').join('');
+      pager.innerHTML = paginationHTML(allProducts.length, currentPage);
+      pager.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => { currentPage = Number(b.dataset.page); renderProducts(); document.getElementById('products').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+      grid.querySelectorAll('[data-add]').forEach((b) => b.onclick = (e) => {
+        e.preventDefault(); e.stopPropagation();
+        PP.addToCart(+b.dataset.add, 1); PP.toast('Added to cart');
+        PP.markAdded(b, +b.dataset.add);
+      });
+    }
+    async function load() {
+      const q = new URLSearchParams({
+        search: document.getElementById('search').value.trim(),
+        category: document.getElementById('category').value,
+        sort: document.getElementById('sort').value
+      });
+      grid.innerHTML = skeleton();
+      try {
+        allProducts = await PP.api('/products?' + q);
+        currentPage = 1;
+        renderProducts();
+      } catch (e) { grid.innerHTML = '<div class="alert error" style="grid-column:1/-1">' + PP.esc(e.message) + '</div>'; document.getElementById('products-pagination').innerHTML = ''; }
+    }
+
+    (async () => {
+      await PP.layout('home');
+      const contact = document.getElementById('contact-details');
+      if (contact) {
+        const phone = PP.config.phone ? '<a class="contact-item" href="tel:' + PP.esc(PP.config.phone) + '">☎ <span>Phone: ' + PP.esc(PP.config.phone) + '</span></a>' : '';
+        contact.innerHTML = phone;
+        const social = [
+          ['facebook-link', PP.config.facebookUrl, 'Facebook Page'],
+          ['telegram-link', PP.config.telegramUrl, 'Telegram Group']
+        ];
+        social.forEach(([id, url, label]) => {
+          const a = document.getElementById(id);
+          if (!a) return;
+          if (url) { a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+          else { a.removeAttribute('href'); a.removeAttribute('target'); a.classList.add('contact-link-unconfigured'); a.textContent = id === 'facebook-link' ? 'Facebook link coming soon' : 'Telegram group link coming soon'; }
+        });
+      }
+      let cats = [];
+      const sel = document.getElementById('category');
+      try {
+        cats = await PP.api('/products/categories');
+        cats.forEach((c) => sel.insertAdjacentHTML('beforeend', '<option value="' + PP.esc(c.name_en) + '">' + PP.esc(c.name) + '</option>'));
+      } catch (e) { /* filter stays empty */ }
+      const initialCategory = new URLSearchParams(location.search).get('category');
+      if (initialCategory && cats.some(c => c.name_en === initialCategory)) sel.value = initialCategory;
+      load();
+      document.getElementById('search').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 300); });
+      document.getElementById('category').onchange = load;
+      document.getElementById('sort').onchange = load;
+    })();
+  </script>
+</body>
+
+</html>

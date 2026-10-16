@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <title>Checkout</title>
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <div class="steps"><span>1. Cart</span><span class="on">2. Details</span><span>3. Pay by QR</span></div>
+    <a class="back" href="/cart.html">← Back to cart</a>
+    <h1>Your details</h1>
+    <div class="two-col">
+      <div class="panel">
+        <div id="msg"></div>
+        <label for="name">Full name</label><input id="name" autocomplete="name">
+        <label for="phone">Phone number</label><input id="phone" type="tel" autocomplete="tel">
+        <label for="address">Delivery address</label><textarea id="address" class="checkout-textarea" rows="3" autocomplete="street-address" required></textarea>
+        <label for="note">Note (optional)</label><textarea id="note" class="checkout-textarea checkout-note" rows="3" placeholder="Delivery instructions or other details"></textarea>
+        <button class="btn" id="pay" style="margin-top:18px;width:100%">Pay by QR</button>
+      </div>
+      <div class="panel pink">
+        <h3>Order summary</h3>
+        <div id="sum"></div>
+      </div>
+    </div>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+
+    let rows = [];
+    const SUMMARY_PAGE_SIZE = 20;
+    let summaryPage = 1;
+    function summaryPager(total, page) {
+      const pages = Math.ceil(total / SUMMARY_PAGE_SIZE); if (pages <= 1) return '';
+      const start = Math.max(1, page - 2), end = Math.min(pages, page + 2);
+      let html = '<nav class="pagination" aria-label="Order summary pages"><button type="button" class="page-btn" data-summary-page="' + (page - 1) + '"' + (page === 1 ? ' disabled' : '') + '>Previous</button>';
+      if (start > 1) html += '<button type="button" class="page-btn" data-summary-page="1">1</button><span class="page-ellipsis">…</span>';
+      for (let n = start; n <= end; n++) html += '<button type="button" class="page-btn ' + (n === page ? 'active' : '') + '" data-summary-page="' + n + '">' + n + '</button>';
+      if (end < pages) html += '<span class="page-ellipsis">…</span><button type="button" class="page-btn" data-summary-page="' + pages + '">' + pages + '</button>';
+      return html + '<span class="page-count">Page ' + page + ' of ' + pages + '</span><button type="button" class="page-btn" data-summary-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + '>Next</button></nav>';
+    }
+    function renderSummary(total) {
+      const pages = Math.max(1, Math.ceil(rows.length / SUMMARY_PAGE_SIZE));
+      summaryPage = Math.min(Math.max(1, summaryPage), pages);
+      const visible = rows.slice((summaryPage - 1) * SUMMARY_PAGE_SIZE, summaryPage * SUMMARY_PAGE_SIZE);
+      const el = document.getElementById('sum');
+      el.innerHTML = visible.map((r) => '<div class="sum-row"><span>' + PP.esc(r.p.name) + ' x' + r.qty + '</span><span>' + PP.money(r.p.price * r.qty) + '</span></div>').join('') +
+        summaryPager(rows.length, summaryPage) + '<div class="sum-row total"><span>Total</span><span>' + PP.money(total) + '</span></div>';
+      el.querySelectorAll('[data-summary-page]').forEach((b) => b.onclick = () => { summaryPage = Number(b.dataset.summaryPage); renderSummary(total); });
+    }
+    (async () => {
+      await PP.layout('cart');
+      if (!PP.cart().length) { location.href = '/cart.html'; return; }
+      // no login needed: fill in what this customer typed last time
+      const saved = PP.customer();
+      document.getElementById('name').value = saved.name || (PP.user() && PP.user().name) || '';
+      document.getElementById('phone').value = saved.phone || '';
+      document.getElementById('address').value = saved.address || '';
+      for (const it of PP.cart()) { try { rows.push({ p: await PP.api('/products/' + it.id), qty: it.qty }); } catch (e) { } }
+      const total = rows.reduce((s, r) => s + r.p.price * r.qty, 0);
+      renderSummary(total);
+      document.getElementById('pay').onclick = async (ev) => {
+        const btn = ev.target, msg = document.getElementById('msg'); msg.innerHTML = ''; btn.disabled = true;
+        try {
+          const o = await PP.api('/orders', {
+            method: 'POST', body: {
+              customer_name: document.getElementById('name').value, phone: document.getElementById('phone').value,
+              address: document.getElementById('address').value, note: document.getElementById('note').value,
+              items: PP.cart()
+            }
+          });
+          PP.saveCustomer({ name: document.getElementById('name').value.trim(), phone: document.getElementById('phone').value.trim(), address: document.getElementById('address').value.trim() });
+          PP.saveOrder({ id: o.id, order_code: o.order_code, token: o.token, total: o.total, status: o.status || 'waiting_pay' });
+          PP.saveCart([]);
+          location.href = '/payment.html?id=' + o.id + '&t=' + encodeURIComponent(o.token);
+        } catch (e) { msg.innerHTML = '<div class="alert error">' + PP.esc(e.message) + '</div>'; btn.disabled = false; }
+      };
+    })();
+
+  </script>
+</body>
+
+</html>

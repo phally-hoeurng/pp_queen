@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Product</title>
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <a class="back" href="/">← Back to shop</a>
+    <div id="view">
+      <p class="muted">Loading...</p>
+    </div>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+    let qty = 1;
+    (async () => {
+      await PP.layout('home');
+      const id = new URLSearchParams(location.search).get('id');
+      const view = document.getElementById('view');
+      try {
+        const p = await PP.api('/products/' + encodeURIComponent(id));
+        document.title = p.name + ' | ' + PP.config.name;
+        const soldOut = p.stock <= 0;
+        view.innerHTML =
+          '<div class="detail">' +
+          '<div class="gallery"><div class="main-img" id="main">' +
+          (p.images.length ? '<img id="main-img" src="' + p.images[0].url + '" alt="' + PP.esc(p.name) + '">' : '<div class="empty">No image</div>') +
+          '<span class="id-tag">' + PP.esc(PP.code(p)) + '</span></div>' +
+          (p.images.length > 1 ? '<div class="thumbs">' + p.images.map((im, i) =>
+            '<button class="' + (i === 0 ? 'on' : '') + '" data-src="' + im.url + '" aria-label="Image ' + (i + 1) + '"><img src="' + im.url + '" alt=""></button>').join('') + '</div>' : '') +
+          '</div>' +
+          '<div>' +
+          (p.category ? '<span class="badge">' + PP.esc(p.category) + '</span>' : '') +
+          '<h1 style="margin-top:10px">' + PP.esc(p.name) + '</h1>' +
+          '<p class="product-meta"><span>Product ID: <b>' + PP.esc(p.product_code || ('PP' + String(p.id).padStart(2, '0'))) + '</b></span>' + '</p>' +
+          '<div class="price" style="font-size:2rem">' + PP.money(p.price) + '</div>' +
+          '<p>' + (soldOut ? '<span class="badge bad">Sold out</span>' : p.stock <= 3 ? '<span class="badge warn">Only ' + p.stock + ' left</span>' : '<span class="badge ok">In stock</span>') + '</p>' +
+          '<div class="desc">' + PP.esc(p.description) + '</div>' +
+          (soldOut ? '' :
+            '<div class="row" style="gap:16px;margin-top:20px"><div class="qty" style="flex:0 0 auto"><button id="minus" aria-label="Less">−</button><span id="q">1</span><button id="plus" aria-label="More">+</button></div>' +
+            '<button class="btn' + (PP.inCart(p.id) ? ' in-cart' : '') + '" id="add" style="flex:1 1 140px">' + (PP.inCart(p.id) ? '✓ In cart' : 'Add to cart') + '</button>' +
+            '<button class="btn dark" id="buy" style="flex:1 1 140px">Buy now</button></div>') +
+          '</div>' +
+          '</div>' +
+          (p.related.length ? '<h2 style="margin-top:48px">You may also like</h2><div class="grid">' + p.related.map((r) =>
+            '<article class="card"><a class="thumb thumb-link" href="/product.html?id=' + r.id + '" aria-label="View ' + PP.esc(r.name) + '">' + (r.image ? '<img loading="lazy" src="' + r.image + '" alt="' + PP.esc(r.name) + '">' : PP.placeholder) + '<span class="id-tag">' + PP.esc(PP.code(r)) + '</span>' +
+            '</a><div class="info"><span class="name">' + PP.esc(r.name) + '</span>' + '<span class="price">' + PP.money(r.price) + '</span><div class="card-actions"><button type="button" class="quick-add' + (PP.inCart(r.id) ? ' in-cart' : '') + '" data-related-add="' + r.id + '"' + (r.stock <= 0 ? ' disabled' : '') + '>' + (r.stock <= 0 ? 'Sold out' : PP.addBtnHtml(r.id)) + '</button><a class="btn ghost card-view" href="/product.html?id=' + r.id + '">View product</a></div></div></article>').join('') + '</div>' : '');
+
+        document.querySelectorAll('.thumbs button').forEach((b) => b.onclick = () => {
+          document.getElementById('main-img').src = b.dataset.src;
+          document.querySelectorAll('.thumbs button').forEach((x) => x.classList.remove('on'));
+          b.classList.add('on');
+        });
+        document.querySelectorAll('[data-related-add]').forEach((b) => b.onclick = () => {
+          if (b.disabled) return;
+          PP.addToCart(+b.dataset.relatedAdd, 1); PP.toast('Added to cart');
+          PP.markAdded(b, +b.dataset.relatedAdd);
+        });
+        if (!soldOut) {
+          const q = document.getElementById('q');
+          document.getElementById('minus').onclick = () => { qty = Math.max(1, qty - 1); q.textContent = qty; };
+          document.getElementById('plus').onclick = () => { qty = Math.min(p.stock, qty + 1); q.textContent = qty; };
+          document.getElementById('add').onclick = (ev) => { PP.addToCart(p.id, qty); PP.toast('Added to cart'); ev.currentTarget.classList.add('in-cart'); ev.currentTarget.textContent = '✓ In cart'; };
+          document.getElementById('buy').onclick = () => { PP.addToCart(p.id, qty); location.href = '/cart.html'; };
+        }
+      } catch (e) { view.innerHTML = '<div class="alert error">' + PP.esc(e.message) + '</div>'; }
+    })();
+  </script>
+</body>
+
+</html>

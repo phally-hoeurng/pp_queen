@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <title>My orders</title>
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <div class="order-hero">
+      <div>
+        <h1>My orders</h1>
+        <p class="muted">View your order, pay any order that is waiting for payment, and follow its status — no customer
+          login needed.</p>
+      </div><a class="btn ghost" href="/">Continue shopping</a>
+    </div>
+    <div id="view">
+      <p class="muted">Loading...</p>
+    </div>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+
+    const STATUS = { waiting_pay: 'Waiting Payment', paid: 'Paid', success: 'Confirmed' };
+    const badge = (s) => '<span class="badge ' + ({ waiting_pay: 'warn', paid: 'ok', success: 'dark' }[s] || '') + '">' + (STATUS[s] || s) + '</span>';
+    const track = (s) => '<div class="order-track">' + ['waiting_pay', 'paid', 'success'].map((x, i) => '<span class="track-step ' + (['waiting_pay', 'paid', 'success'].indexOf(s) >= i ? 'active' : '') + '">' + STATUS[x] + '</span>').join('') + '</div>';
+    (async () => {
+      await PP.layout('orders');
+      const view = document.getElementById('view');
+      let rows = [];
+
+      // 1) orders this browser placed (no login needed)
+      const local = PP.myOrders();
+      if (local.length) {
+        try {
+          const found = await PP.api('/orders/lookup', { method: 'POST', body: { orders: local.map((o) => ({ id: o.id, token: o.token })) } });
+          found.forEach((o) => PP.saveOrder({ id: o.id, status: o.status, total: o.total }));
+          rows = found.map((o) => Object.assign({}, o, { token: PP.orderToken(o.id) }));
+        } catch (e) { rows = local.slice(); }
+      }
+      // 2) orders of a logged-in account (admin or older customer accounts)
+      if (PP.token()) {
+        try {
+          const mine = await PP.api('/orders/mine');
+          mine.forEach((o) => { if (!rows.find((x) => x.id === o.id)) rows.push(o); });
+        } catch (e) { /* ignore */ }
+      }
+      rows.sort((a, b) => b.id - a.id);
+
+      if (!rows.length) {
+        view.innerHTML = '<div class="empty"><p>You have no orders yet.</p><a class="btn" href="/">Start shopping</a></div>';
+        return;
+      }
+      const PAGE_SIZE = 10;
+      let currentPage = 1;
+      const renderItem = (item) => PP.orderItemHtml(item, { cls: 'oi-lg' });
+      function pager(total, page) {
+        const pages = Math.ceil(total / PAGE_SIZE); if (pages <= 1) return '';
+        const start = Math.max(1, page - 2), end = Math.min(pages, page + 2);
+        let html = '<nav class="pagination" aria-label="Order pages"><button type="button" class="page-btn" data-page="' + (page - 1) + '"' + (page === 1 ? ' disabled' : '') + '>Previous</button>';
+        if (start > 1) html += '<button type="button" class="page-btn" data-page="1">1</button><span class="page-ellipsis">…</span>';
+        for (let n = start; n <= end; n++) html += '<button type="button" class="page-btn ' + (n === page ? 'active' : '') + '" data-page="' + n + '">' + n + '</button>';
+        if (end < pages) html += '<span class="page-ellipsis">…</span><button type="button" class="page-btn" data-page="' + pages + '">' + pages + '</button>';
+        return html + '<span class="page-count">Page ' + page + ' of ' + pages + '</span><button type="button" class="page-btn" data-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + '>Next</button></nav>';
+      }
+      function renderOrders() {
+        const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+        currentPage = Math.min(Math.max(1, currentPage), pageCount);
+        const visibleRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+        view.innerHTML = '<div class="my-orders-list">' + visibleRows.map((o) => {
+          const code = PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0')));
+          const items = Array.isArray(o.items) && o.items.length ? o.items : [{ name: o.product_name || 'Order', product_image: o.product_image, qty: 1 }];
+          return '<article class="my-order-card">' +
+            '<div class="my-order-products"><div class="my-order-section-label">Products (' + items.length + ')</div>' + items.map(renderItem).join('') + '</div>' +
+            '<div class="my-order-information"><div class="my-order-code">' + code + '</div>' +
+            '<div class="my-order-meta"><span class="muted">Date</span><b>' + (o.created_at ? PP.date(o.created_at) : '—') + '</b></div>' +
+            '<div class="my-order-meta"><span class="muted">Total</span><b class="my-order-total">' + PP.money(o.total) + '</b></div>' +
+            '<div class="my-order-meta"><span class="muted">Status</span>' + badge(o.status) + '</div></div>' +
+            '<div class="my-order-action"><a class="btn small ' + (o.status === 'waiting_pay' ? '' : 'ghost') + '" href="/payment.html?id=' + encodeURIComponent(o.id) + (o.token ? '&t=' + encodeURIComponent(o.token) : '') + '">' + (o.status === 'waiting_pay' ? 'Pay now' : 'View order') + '</a></div>' +
+            '</article>';
+        }).join('') + '</div>' + pager(rows.length, currentPage) +
+          '<p class="muted" style="margin-top:14px">Your orders are saved in this browser. Lost an order? Tap the chat button and tell us your order number.</p>';
+        view.querySelectorAll('.pagination [data-page]').forEach((b) => b.onclick = () => { currentPage = Number(b.dataset.page); renderOrders(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+      }
+      renderOrders();
+    })();
+
+  </script>
+</body>
+
+</html>

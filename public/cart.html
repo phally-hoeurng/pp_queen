@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <title>Cart</title>
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <div class="steps"><span class="on">1. Cart</span><span>2. Details</span><span>3. Pay by QR</span></div>
+    <a class="back" href="/">← Continue shopping</a>
+    <h1>Your cart</h1>
+    <div id="view"></div>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+
+    const PAGE_SIZE = 20;
+    let cartPage = 1;
+    function pagerMarkup(total, page) {
+      const pages = Math.ceil(total / PAGE_SIZE); if (pages <= 1) return '';
+      const start = Math.max(1, page - 2), end = Math.min(pages, page + 2);
+      let html = '<nav class="pagination" aria-label="Cart pages"><button class="page-btn" type="button" data-page="' + (page - 1) + '"' + (page === 1 ? ' disabled' : '') + '>Previous</button>';
+      if (start > 1) html += '<button class="page-btn" type="button" data-page="1">1</button><span class="page-ellipsis">…</span>';
+      for (let n = start; n <= end; n++) html += '<button class="page-btn ' + (n === page ? 'active' : '') + '" type="button" data-page="' + n + '">' + n + '</button>';
+      if (end < pages) html += '<span class="page-ellipsis">…</span><button class="page-btn" type="button" data-page="' + pages + '">' + pages + '</button>';
+      return html + '<span class="page-count">Page ' + page + ' of ' + pages + '</span><button class="page-btn" type="button" data-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + '>Next</button></nav>';
+    }
+    async function render() {
+      const view = document.getElementById('view');
+      let cart = PP.cart();
+      if (!cart.length) { view.innerHTML = '<div class="empty"><p>Your cart is empty.</p><a class="btn" href="/">Start shopping</a></div>'; return; }
+      const rows = [];
+      for (const it of cart) {
+        try { const p = await PP.api('/products/' + it.id); rows.push({ p, qty: Math.min(it.qty, Math.max(p.stock, 1)) }); }
+        catch (e) { /* product removed or hidden */ }
+      }
+      PP.saveCart(rows.map((r) => ({ id: r.p.id, qty: r.qty })));
+      if (!rows.length) { render(); return; }
+      const total = rows.reduce((s, r) => s + r.p.price * r.qty, 0);
+      const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      cartPage = Math.min(Math.max(1, cartPage), pageCount);
+      const visibleRows = rows.slice((cartPage - 1) * PAGE_SIZE, cartPage * PAGE_SIZE);
+      view.innerHTML = '<div class="two-col"><div class="panel">' + visibleRows.map((r) =>
+        '<div class="line-item">' + (r.p.image ? '<img src="' + r.p.image + '" alt="">' : '<div class="ph"></div>') +
+        '<div><a href="/product.html?id=' + r.p.id + '"><b>' + PP.esc(r.p.name) + '</b></a><div class="muted">' + PP.money(r.p.price) + ' each</div>' +
+        '<div class="row" style="margin-top:8px;gap:10px"><div class="qty" style="flex:0 0 auto"><button data-minus="' + r.p.id + '" aria-label="Less">−</button><span>' + r.qty + '</span><button data-plus="' + r.p.id + '" data-max="' + r.p.stock + '" aria-label="More">+</button></div>' +
+        '<button class="btn danger small" style="flex:0 0 auto" data-remove="' + r.p.id + '">Remove</button></div></div>' +
+        '<b>' + PP.money(r.p.price * r.qty) + '</b></div>').join('') + pagerMarkup(rows.length, cartPage) + '</div>' +
+        '<div class="panel pink"><h3>Summary</h3><div class="sum-row"><span>Items</span><span>' + rows.reduce((n, r) => n + r.qty, 0) + '</span></div>' +
+        '<div class="sum-row total"><span>Total</span><span>' + PP.money(total) + '</span></div>' +
+        '<a class="btn" style="width:100%;margin-top:14px" href="/checkout.html">Checkout</a></div></div>';
+      view.querySelectorAll('.pagination [data-page]').forEach((b) => b.onclick = () => { cartPage = Number(b.dataset.page); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+      const change = (id, d, max) => { const c = PP.cart(); const f = c.find((i) => i.id === id); if (!f) return; f.qty = Math.max(1, Math.min(max || 99, f.qty + d)); PP.saveCart(c); render(); };
+      view.querySelectorAll('[data-minus]').forEach((b) => b.onclick = () => change(+b.dataset.minus, -1));
+      view.querySelectorAll('[data-plus]').forEach((b) => b.onclick = () => change(+b.dataset.plus, 1, +b.dataset.max));
+      view.querySelectorAll('[data-remove]').forEach((b) => b.onclick = () => { PP.saveCart(PP.cart().filter((i) => i.id !== +b.dataset.remove)); render(); });
+    }
+    (async () => { await PP.layout('cart'); render(); })();
+
+  </script>
+</body>
+
+</html>

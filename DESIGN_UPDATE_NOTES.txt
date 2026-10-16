@@ -1,0 +1,5 @@
+PP Queen visual-only design update
+
+This update changes only public/css/style.css. The design follows the supplied reference screenshots: premium white and pink palette, navy text, taller contact banner, clean social cards, rounded search inputs, improved product cards and admin tabs, and responsive layouts. Leaf/blob-like decorative pseudo-elements are disabled for the hero/contact banner.
+
+No HTML, JavaScript, server/API, database schema, validation, order/payment workflow, product-management behavior, or event handlers were changed. This package is a visual styling update only.

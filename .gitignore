@@ -1,0 +1,51 @@
+
+# Dependencies
+node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Product uploads: keep the folder, exclude uploaded files
+public/uploads/*
+!public/uploads/.gitkeep
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Local databases and backups
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.backup
+backups/
+database-backups/
+
+# Temporary files
+uploads/temp/
+tmp/
+temp/
+
+# Build and test output
+coverage/
+dist/
+build/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+
+# Python environments
+.venv/
+venv/
+__pycache__/
+*.pyc

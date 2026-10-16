@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin</title>
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <h1>Admin</h1>
+    <div class="admin-tabs" role="tablist">
+      <button data-tab="dash" class="on">Dashboard</button>
+      <button data-tab="chat">Chat<span class="tab-badge hidden" id="chat-badge">0</span></button>
+      <button data-tab="orders">Orders</button>
+      <button data-tab="waiting-pay">Waiting Payment</button>
+      <button data-tab="waiting-confirm">Waiting Confirm</button>
+      <button data-tab="products"><span aria-hidden="true">▦</span> Products</button>
+    </div>
+    <div id="msg"></div>
+    <section id="tab-dash"></section>
+    <section id="tab-products" class="hidden"></section>
+    <section id="tab-orders" class="hidden"></section>
+    <section id="tab-waiting-pay" class="hidden"></section>
+    <section id="tab-waiting-confirm" class="hidden"></section>
+    <section id="tab-chat" class="hidden"></section>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script src="/js/imgedit.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const STATUS = { waiting_pay: 'Waiting Payment', paid: 'Paid', success: 'Confirmed' };
+    const statusClass = { waiting_pay: 'warn', paid: 'ok', success: 'dark' };
+    const badge = (s) => '<span class="badge ' + (statusClass[s] || '') + '">' + (STATUS[s] || s) + '</span>';
+    function flash(text, ok) {
+      $('msg').innerHTML = '<div class="alert ' + (ok ? 'ok' : 'error') + '">' + PP.esc(text) + '</div>';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      setTimeout(() => ($('msg').innerHTML = ''), 4000);
+    }
+
+    /* ---------- Tabs ---------- */
+    function showTab(name) {
+      document.querySelectorAll('.admin-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
+      ['dash', 'products', 'chat', 'orders', 'waiting-pay', 'waiting-confirm'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== name));
+      if (name !== 'chat') { clearInterval(chatTimer); clearInterval(listTimer); }
+      ({ dash: loadDash, products: loadProducts, orders: loadOrders, 'waiting-pay': () => loadOrders('waiting_pay', 'Waiting Payment'), 'waiting-confirm': () => loadOrders('paid', 'Waiting Confirm'), chat: loadChat })[name]();
+    }
+
+    /* ---------- Dashboard ---------- */
+    async function loadDash() {
+      try {
+        const s = await PP.api('/orders/admin/stats');
+        const max = Math.max(1, ...s.last7.map((d) => d.sales));
+        $('tab-dash').innerHTML =
+          '<div class="stats">' +
+          '<div class="stat"><b>' + s.todayOrders + '</b>Orders today</div>' +
+          '<div class="stat"><b>' + PP.money(s.todaySales) + '</b>Sales today</div>' +
+          '<div class="stat"><b>' + s.pendingOrders + '</b>Waiting for payment</div>' +
+          '<div class="stat"><b>' + s.paidOrders + '</b>Waiting for confirm order</div>' +
+          '</div>' +
+          '<h3 style="margin-top:24px">Low stock (3 or less)</h3>' +
+          (s.lowStock.length ? '<div class="low-stock-list">' + s.lowStock.map((p) => '<button type="button" class="low-stock-item" data-low-edit="' + p.id + '"><img src="' + (p.image ? (p.image.startsWith('/uploads/') ? PP.esc(p.image) : '/uploads/' + PP.esc(p.image)) : '/images/logo-mark.png') + '" alt=""><span><b>' + PP.esc(p.product_code || ('PP' + String(p.id).padStart(2,'0'))) + ' · ' + PP.esc(p.name) + '</b><small>Current stock: ' + p.stock + ' · Low stock · Edit product</small></span></button>').join('') + '</div>' : '<p class="muted">All products have enough stock.</p>');
+        $('tab-dash').querySelectorAll('[data-low-edit]').forEach((b) => b.onclick = async () => { try { const list = await PP.api('/products/admin/all'); const item = list.find((x) => x.id === Number(b.dataset.lowEdit)); if (item) productForm(item, false); else flash('Product not found.', false); } catch (e) { flash(e.message, false); } });
+      } catch (e) { flash(e.message); }
+    }
+
+    /* ---------- Products ---------- */
+    const PAGE_SIZE = 20;
+    const IMPORT_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg>';
+    // search by product ID (PP05, pp05, 5) or by name in any language
+    function matchesProduct(p, q) {
+      q = String(q || '').trim().toLowerCase();
+      if (!q) return true;
+      const code = String(p.product_code || ('PP' + String(p.id).padStart(2, '0'))).toLowerCase();
+      if (code.includes(q) || String(p.id) === q) return true;
+      if (/^\d+$/.test(q) && Number(code.replace(/\D/g, '')) === Number(q)) return true;
+      return [p.name, p.name_km, p.name_zh].filter(Boolean).some((n) => String(n).toLowerCase().includes(q));
+    }
+    let products = [];
+    const productPages = { bags: 1, shampoo: 1 };
+    let orderPages = { all: 1, waiting_pay: 1, paid: 1 };
+    function pagerMarkup(total, page, key) {
+      const pages = Math.ceil(total / PAGE_SIZE);
+      if (pages <= 1) return '';
+      const start = Math.max(1, page - 2), end = Math.min(pages, page + 2);
+      let html = '<nav class="pagination" data-pager="' + key + '" aria-label="Pagination">' +
+        '<button type="button" class="page-btn" data-page="' + (page - 1) + '"' + (page === 1 ? ' disabled' : '') + '>Previous</button>';
+      if (start > 1) html += '<button type="button" class="page-btn" data-page="1">1</button><span class="page-ellipsis">…</span>';
+      for (let n = start; n <= end; n++) html += '<button type="button" class="page-btn ' + (n === page ? 'active' : '') + '" data-page="' + n + '" aria-current="' + (n === page ? 'page' : 'false') + '">' + n + '</button>';
+      if (end < pages) html += '<span class="page-ellipsis">…</span><button type="button" class="page-btn" data-page="' + pages + '">' + pages + '</button>';
+      return html + '<span class="page-count">Page ' + page + ' of ' + pages + '</span><button type="button" class="page-btn" data-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + '>Next</button></nav>';
+    }
+    async function loadProducts() {
+      try {
+        products = await PP.api('/products/admin/all');
+        $('tab-products').innerHTML =
+          '<div class="product-toolbar"><button class="btn" id="p-add-bag"><span aria-hidden="true">👜</span> Create Bag</button><input id="p-search" type="search" placeholder="Search by ID or name" aria-label="Search products by ID or name"><button class="btn" id="p-add-shampoo"><span aria-hidden="true">🧴</span> Create Shampoo</button></div>' +
+          '<div class="product-import-toolbar"><a class="btn ghost import-template-link" href="/templates/pp-queen-products-template.xlsx" download>↓ Download Excel template</a><button class="btn ghost" id="p-import" type="button" title="Import products and matching images">⇧ Import products</button><input id="p-import-file" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden><input id="p-import-images" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden></div>' +
+          '<div class="import-hint"><b>Quick import:</b> Choose your Excel file, then select product images. Match each image filename to the <i>Image Filename (optional)</i> column. Leave it blank for products without images. JPG, PNG, WEBP and GIF supported (max 5 MB per image).</div>' +
+          '<div id="p-table"></div>';
+        $('p-add-shampoo').onclick = () => productForm(null, false, 'Shampoo');
+        $('p-import').onclick = () => $('p-import-file').click();
+        $('p-import-file').onchange = async (e) => {
+          const f = e.target.files && e.target.files[0];
+          if (!f) return;
+          if (!/\.xlsx?$/i.test(f.name)) { flash('Please select an Excel .xlsx or .xls file.', false); e.target.value = ''; return; }
+          const imageInput = $('p-import-images');
+          const go = async () => {
+            const fd = new FormData(); fd.append('file', f);
+            Array.from(imageInput.files || []).forEach(img => fd.append('images', img, img.name));
+            const b = $('p-import'); b.disabled = true; b.classList.add('busy');
+            try {
+              const result = await PP.api('/products/admin/import', {method:'POST', body:fd});
+              let message = 'Imported ' + result.created + ' product(s). Skipped rows: ' + result.skipped + '.';
+              if (result.imagesAttached) message += ' Images attached: ' + result.imagesAttached + '.';
+              if (result.imagesUploaded > result.imagesAttached) message += ' Unmatched images: ' + (result.imagesUploaded - result.imagesAttached) + '. Check filenames in Excel.';
+              flash(message, result.created > 0 || result.skipped === 0);
+              await loadProducts();
+            } catch(err) { flash(err.message || 'Import failed.', false); }
+            finally { b.disabled = false; b.classList.remove('busy'); e.target.value = ''; imageInput.value = ''; imageInput.onchange = null; }
+          };
+          imageInput.onchange = go;
+          if (imageInput.files && imageInput.files.length) await go();
+          else {
+            const choose = confirm('Do you want to select product images too? Click OK to choose images, or Cancel to import without images.');
+            if (choose) imageInput.click();
+            else await go();
+          }
+        };
+        $('p-add-bag').onclick = () => productForm(null, false, 'Bags');
+        $('p-search').oninput = () => { productPages.bags = 1; productPages.shampoo = 1; drawProducts(); };
+        drawProducts();
+      } catch (e) { flash(e.message); }
+    }
+    function productRows(list, key) {
+      const page = productPages[key] || 1;
+      const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+      const safePage = Math.min(page, pages);
+      productPages[key] = safePage;
+      const visible = list.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+      const table = visible.length
+        ? '<div class="table-wrap"><table><thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
+        visible.map((p) => '<tr><td><div class="admin-product-cell">' + (p.image ? '<img src="' + p.image + '" class="preview-thumb" alt="">' : '') + '<span><small>' + PP.esc(p.product_code || ('PP' + String(p.id).padStart(2, '0'))) + '</small><b>' + PP.esc(p.name) + '</b></span></div></td>' +
+          '<td class="price-cell">' + PP.money(p.price) + '</td><td>' + p.stock + '</td><td>' + (p.active ? '<span class="badge ok">Active</span>' : '<span class="badge">Hidden</span>') + '</td>' +
+          '<td><div class="actions"><button class="btn small ghost icon-action" data-edit="' + p.id + '" aria-label="Edit ' + PP.esc(p.name) + '" title="Edit">✎</button><button class="btn small danger icon-action" data-del="' + p.id + '" aria-label="Delete ' + PP.esc(p.name) + '" title="Delete">⌫</button></div></td></tr>').join('') +
+        '</tbody></table></div>'
+        : '<div class="empty">No products in this category yet.</div>';
+      return table + pagerMarkup(list.length, safePage, 'products-' + key);
+    }
+    function bindProductActions(root) {
+      root.querySelectorAll('[data-view]').forEach((b) => b.onclick = () => productForm(products.find((p) => p.id === +b.dataset.view), true));
+      root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => productForm(products.find((p) => p.id === +b.dataset.edit)));
+      root.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+        const p = products.find((x) => x.id === +b.dataset.del);
+        if (!p) return;
+        if (!confirm('Delete "' + p.name + '"? This also deletes its images.')) return;
+        try { await PP.api('/products/' + p.id, { method: 'DELETE' }); flash('Product deleted.', true); loadProducts(); }
+        catch (e) { flash(e.message); }
+      });
+    }
+    function drawProducts() {
+      const q = ($('p-search').value || '').toLowerCase();
+      const filtered = products.filter((p) => matchesProduct(p, q));
+      const bags = filtered.filter((p) => ['bag', 'bags'].includes(String(p.category).trim().toLowerCase()));
+      const shampoos = filtered.filter((p) => String(p.category).toLowerCase() === 'shampoo');
+      if (!q) { /* keep the user's last page while browsing categories */ }
+      else { productPages.bags = 1; productPages.shampoo = 1; }
+      $('p-table').innerHTML =
+        '<div class="product-columns"><section class="product-list-block"><h2>Bags <span class="product-list-count">' + bags.length + ' products</span></h2>' + productRows(bags, 'bags') + '</section>' +
+        '<section class="product-list-block"><h2>Shampoo <span class="product-list-count">' + shampoos.length + ' products</span></h2>' + productRows(shampoos, 'shampoo') + '</section></div>';
+      $('p-table').querySelectorAll('.pagination[data-pager]').forEach((nav) => nav.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => {
+        const key = nav.dataset.pager.replace('products-', '');
+        productPages[key] = Number(b.dataset.page);
+        redrawProductPage(q, key);
+      }));
+      bindProductActions($('p-table'));
+    }
+    function redrawProductPage(q, changedKey) {
+      // Redraw from the already loaded catalog; the current search is preserved.
+      const filtered = products.filter((p) => matchesProduct(p, q));
+      const bags = filtered.filter((p) => ['bag', 'bags'].includes(String(p.category).trim().toLowerCase()));
+      const shampoos = filtered.filter((p) => String(p.category).toLowerCase() === 'shampoo');
+      $('p-table').innerHTML = '<div class="product-columns"><section class="product-list-block"><h2>Bags <span class="product-list-count">' + bags.length + ' products</span></h2>' + productRows(bags, 'bags') + '</section>' +
+        '<section class="product-list-block"><h2>Shampoo <span class="product-list-count">' + shampoos.length + ' products</span></h2>' + productRows(shampoos, 'shampoo') + '</section></div>';
+      $('p-table').querySelectorAll('.pagination[data-pager]').forEach((nav) => nav.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => {
+        const key = nav.dataset.pager.replace('products-', ''); productPages[key] = Number(b.dataset.page); redrawProductPage(q, key);
+      }));
+      bindProductActions($('p-table'));
+    }
+    async function productForm(p, viewOnly, forcedCategory) {
+      const edit = !!p;
+      const category = forcedCategory || (p && p.category) || 'Bags';
+      const bg = document.createElement('div');
+      bg.className = 'modal-bg';
+      const ro = viewOnly ? ' readonly' : '';
+      const dis = (viewOnly || !!forcedCategory) ? ' disabled' : '';
+      const MAX_IMG = 10;
+      bg.innerHTML =
+        '<div class="modal product-modal" data-no-translate role="dialog" aria-modal="true" aria-labelledby="product-modal-title">' +
+        '<h2 id="product-modal-title">' + (viewOnly ? 'View product' : edit ? 'Edit product' : 'Add ' + category) + '</h2>' +
+        (edit ? '<p class="product-id-line">Product ID: <b>' + PP.esc(PP.code(p)) + '</b></p>' : '') + '<div id="f-msg"></div>' +
+        '<label for="f-name">Product name</label><input id="f-name" maxlength="180" value="' + PP.esc(edit ? p.name : '') + '"' + ro + ' required>' +
+        '<div class="row"><div><label for="f-price">Price</label><input id="f-price" type="number" min="0" step="0.01" value="' + (edit ? p.price : '') + '"' + ro + ' required></div>' +
+        '<div><label for="f-stock">Stock</label><input id="f-stock" type="number" min="0" step="1" value="' + (edit ? p.stock : 0) + '"' + ro + ' required></div></div>' +
+        '<label for="f-cat">Category</label><select id="f-cat"' + dis + '><option value="Bags"' + (category === 'Bags' ? ' selected' : '') + '>Bags</option><option value="Shampoo"' + (category === 'Shampoo' ? ' selected' : '') + '>Shampoo</option></select>' +
+        '<label for="f-desc">Description</label><textarea id="f-desc" maxlength="5000"' + ro + '></textarea>' +
+        (viewOnly
+          ? '<div class="img-manager"><div class="img-grid" id="f-preview"></div></div>'
+          : '<label>Product images <span class="img-count" id="f-count"></span></label>' +
+            '<div class="img-manager">' +
+            '<div class="img-pick"><button type="button" class="btn ghost" id="f-choose"><span aria-hidden="true">🖼</span> Choose File</button>' +
+            '<small class="muted">Pick a photo, crop it, then press Apply Crop. Up to ' + MAX_IMG + ' images. Mark one as Main.</small></div>' +
+            '<input id="f-files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>' +
+            '<div class="img-grid" id="f-preview"></div></div>') +
+        '<div class="row" style="margin-top:18px">' +
+        (!viewOnly ? '<button class="btn" id="f-save">Save Product</button>' : '<button class="btn" id="f-edit">Edit</button>') +
+        '<button class="btn ghost" id="f-cancel">Close</button></div></div>';
+      document.body.appendChild(bg);
+      const objectUrls = [];
+      const close = () => { objectUrls.forEach((u) => URL.revokeObjectURL(u)); bg.remove(); };
+      bg.querySelector('#f-cancel').onclick = close;
+      // Intentional: backdrop clicks do not close the product form; use Save Product or Close.
+      bg.querySelector('#f-desc').value = edit ? (p.description || '') : '';
+
+      // One ordered list for old (saved) and new (just cropped) images.
+      const imgs = ((edit && Array.isArray(p.images)) ? p.images : []).map((im) => ({ kind: 'old', id: im.id, url: im.url, main: !!im.is_main }));
+      if (imgs.length && !imgs.some((x) => x.main)) imgs[0].main = true;
+      const removed = [];
+      const preview = bg.querySelector('#f-preview');
+      const ID_TAG = edit ? '<span class="id-tag">' + PP.esc(PP.code(p)) + '</span>' : '';
+
+      if (viewOnly) {
+        bg.querySelector('#f-edit').onclick = () => { close(); productForm(p, false, p.category); };
+        preview.innerHTML = imgs.map((im) => '<div class="img-tile' + (im.main ? ' is-main' : '') + '"><img src="' + PP.esc(im.url) + '" alt="Product image">' + (im.main ? '<span class="main-tag">Main</span>' : '') + ID_TAG + '</div>').join('') || '<p class="muted">No images.</p>';
+        return;
+      }
+
+      function draw() {
+        if (imgs.length && !imgs.some((x) => x.main)) imgs[0].main = true;
+        bg.querySelector('#f-count').textContent = '(' + imgs.length + ' / ' + MAX_IMG + ')';
+        preview.innerHTML = imgs.map((im, i) =>
+          '<div class="img-tile' + (im.main ? ' is-main' : '') + '" data-i="' + i + '">' +
+          '<img src="' + PP.esc(im.url) + '" alt="Product image ' + (i + 1) + '">' + ID_TAG +
+          (im.main ? '<span class="main-tag">Main</span>' : '') +
+          '<div class="img-tools">' +
+          '<button type="button" class="icon-btn" data-act="main" title="Set as main image" aria-label="Set as main image"' + (im.main ? ' disabled' : '') + '>★</button>' +
+          '<button type="button" class="icon-btn" data-act="up" title="Move earlier" aria-label="Move earlier"' + (i === 0 ? ' disabled' : '') + '>←</button>' +
+          '<button type="button" class="icon-btn" data-act="down" title="Move later" aria-label="Move later"' + (i === imgs.length - 1 ? ' disabled' : '') + '>→</button>' +
+          '<button type="button" class="icon-btn" data-act="crop" title="Crop &amp; edit" aria-label="Crop and edit">✎</button>' +
+          '<button type="button" class="icon-btn danger" data-act="remove" title="Remove" aria-label="Remove image">✕</button>' +
+          '</div></div>').join('') || '<p class="muted img-empty">No images yet. Click Choose File.</p>';
+        bg.querySelector('#f-choose').disabled = imgs.length >= MAX_IMG;
+      }
+      function addBlob(blob, at) {
+        const url = URL.createObjectURL(blob); objectUrls.push(url);
+        const item = { kind: 'new', blob, url, main: false };
+        if (at === undefined) imgs.push(item); else imgs.splice(at, 1, item);
+        return item;
+      }
+      preview.addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-act]'); if (!b) return;
+        const i = Number(b.closest('.img-tile').dataset.i), act = b.dataset.act;
+        if (act === 'main') imgs.forEach((x, k) => x.main = k === i);
+        else if (act === 'up' && i > 0) [imgs[i - 1], imgs[i]] = [imgs[i], imgs[i - 1]];
+        else if (act === 'down' && i < imgs.length - 1) [imgs[i + 1], imgs[i]] = [imgs[i], imgs[i + 1]];
+        else if (act === 'remove') { const [gone] = imgs.splice(i, 1); if (gone.kind === 'old') removed.push(gone.id); }
+        else if (act === 'crop') {
+          const cur = imgs[i];
+          const blob = await PPImageEditor.open(cur.url);
+          if (blob) { const wasMain = cur.main; if (cur.kind === 'old') removed.push(cur.id); const it = addBlob(blob, i); it.main = wasMain; }
+        }
+        draw();
+      });
+      const fileInput = bg.querySelector('#f-files');
+      bg.querySelector('#f-choose').onclick = () => fileInput.click();
+      fileInput.onchange = async () => {
+        const chosen = [...fileInput.files]; fileInput.value = '';
+        for (const f of chosen) {
+          if (imgs.length >= MAX_IMG) { flash('A product can have at most ' + MAX_IMG + ' images.', false); break; }
+          if (!/^image\/(jpeg|png|webp|gif)$/.test(f.type)) { flash('Only JPG, PNG, WEBP or GIF images are allowed.', false); continue; }
+          const blob = await PPImageEditor.open(f);   // Crop & Edit window; null = cancelled
+          if (blob) { addBlob(blob); draw(); }
+        }
+        draw();
+      };
+      draw();
+
+      bg.querySelector('#f-save').onclick = async (ev) => {
+        const btn = ev.target, m = bg.querySelector('#f-msg'); m.innerHTML = '';
+        const fd = new FormData();
+        fd.append('name', bg.querySelector('#f-name').value);
+        fd.append('name_km', edit ? (p.name_km || '') : ''); fd.append('name_zh', edit ? (p.name_zh || '') : '');
+        fd.append('price', bg.querySelector('#f-price').value);
+        fd.append('stock', bg.querySelector('#f-stock').value);
+        fd.append('category', bg.querySelector('#f-cat').value);
+        fd.append('description', bg.querySelector('#f-desc').value);
+        fd.append('description_km', edit ? (p.description_km || '') : ''); fd.append('description_zh', edit ? (p.description_zh || '') : '');
+        fd.append('active', edit ? String(p.active !== false) : 'true');
+        if (imgs.length > MAX_IMG) { m.innerHTML = '<div class="alert error">A product can have at most ' + MAX_IMG + ' images.</div>'; return; }
+        let n = 0, mainKey = '', mainIndex = 0;
+        const layout = imgs.map((im) => {
+          const key = im.kind === 'old' ? 'old:' + im.id : 'new:' + (n++);
+          if (im.kind === 'new') fd.append('images', im.blob, 'product-' + Date.now() + '-' + n + '.jpg');
+          if (im.main) { mainKey = key; if (im.kind === 'new') mainIndex = n - 1; }
+          return key;
+        });
+        if (edit) {
+          fd.append('removeImages', JSON.stringify(removed));
+          fd.append('layout', JSON.stringify(layout));
+          fd.append('main', mainKey);
+        } else {
+          fd.append('mainIndex', String(mainIndex));
+        }
+        btn.disabled = true;
+        try {
+          await PP.api(edit ? '/products/' + p.id : '/products', { method: edit ? 'PUT' : 'POST', body: fd });
+          close(); flash(edit ? 'Product updated.' : 'Product added.', true); loadProducts();
+        } catch (e) { m.innerHTML = '<div class="alert error">' + PP.esc(e.message) + '</div>'; btn.disabled = false; }
+      };
+    }
+
+    /* ---------- Orders ---------- */
+    async function loadOrders(forcedStatus, title) {
+      const keep = forcedStatus || ($('o-filter') ? $('o-filter').value : '');
+      try {
+        const list = await PP.api('/orders/admin/all' + (keep ? '?status=' + keep : ''));
+        const sectionId = forcedStatus === 'waiting_pay' ? 'tab-waiting-pay' : forcedStatus === 'paid' ? 'tab-waiting-confirm' : 'tab-orders';
+        const section = $(sectionId);
+        const pageKey = forcedStatus || (keep || 'all');
+        if (!Number.isInteger(orderPages[pageKey])) orderPages[pageKey] = 1;
+        const render = () => {
+          const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+          orderPages[pageKey] = Math.min(Math.max(1, orderPages[pageKey]), pageCount);
+          const page = orderPages[pageKey];
+          const visible = list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+          section.innerHTML =
+            '<div class="row order-toolbar" style="margin-bottom:14px">' + (title ? '<h2 style="margin:0">' + title + '</h2>' : '<h2 style="margin:0">Orders</h2>') + (!forcedStatus ? '<select id="o-filter" style="flex:0 1 240px" aria-label="Filter by status"><option value="">All orders</option>' + ['waiting_pay', 'paid', 'success'].map((s) => '<option value="' + s + '"' + (s === keep ? ' selected' : '') + '>' + STATUS[s] + '</option>').join('') + '</select>' : '') + '</div>' +
+            (list.length ? '<div class="table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Phone</th><th>Price</th><th>Status</th><th>Date</th><th>Action</th></tr></thead><tbody>' +
+              visible.map((o) => '<tr><td><b>' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</b></td><td>' + PP.esc(o.customer_name) + '</td><td>' + PP.esc(o.phone) + '</td><td>' + PP.money(o.total) + '</td><td>' + badge(o.status) +
+                (o.payment_screenshot ? ' <span class="badge">Payment Proof</span>' : '') + '</td><td>' + PP.date(o.created_at) + '</td>' +
+                '<td><button class="btn small" data-open="' + o.id + '">Open</button></td></tr>').join('') + '</tbody></table></div>' + pagerMarkup(list.length, page, 'orders-' + pageKey)
+              : '<div class="empty">No orders found.</div>');
+          if (!forcedStatus && $('o-filter')) $('o-filter').onchange = () => { orderPages[$('o-filter').value || 'all'] = 1; loadOrders(); };
+          section.querySelectorAll('.pagination[data-pager]').forEach((nav) => nav.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => {
+            orderPages[pageKey] = Number(b.dataset.page); render();
+          }));
+          section.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => orderDetail(+b.dataset.open));
+        };
+        render();
+      } catch (e) { flash(e.message); }
+    }
+    function renderAdminOrderItems(items, page) {
+      const size = PAGE_SIZE;
+      const pages = Math.max(1, Math.ceil(items.length / size));
+      const safePage = Math.min(Math.max(1, page), pages);
+      const target = document.getElementById('admin-order-items-list');
+      const pager = document.getElementById('admin-order-items-pagination');
+      if (!target || !pager) return;
+      target.innerHTML = items.slice((safePage - 1) * size, safePage * size).map((i) => PP.orderItemHtml(i, { price: true, cls: 'oi-lg' })).join('');
+      pager.innerHTML = pagerMarkup(items.length, safePage, 'admin-order-items');
+      pager.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => renderAdminOrderItems(items, Number(b.dataset.page)));
+    }
+    async function orderDetail(id) {
+      try {
+        const o = await PP.api('/orders/' + id);
+        const bg = document.createElement('div'); bg.className = 'modal-bg';
+        const btns = [];
+        if (o.status === 'paid') btns.push(['success', 'Confirm Order', '']);
+        bg.innerHTML = '<div class="modal" role="dialog" aria-modal="true"><h2>Order ' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + ' ' + badge(o.status) + '</h2>' +
+          '<p><b>' + PP.esc(o.customer_name) + '</b><br>' + PP.esc(o.phone) + '<br>' + PP.esc(o.address) + (o.note ? '<br><i>Note: ' + PP.esc(o.note) + '</i>' : '') + '</p>' +
+          '<h3 class="oi-heading">Products in this order · ' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</h3><div class="order-detail-items" id="admin-order-items-list"></div><div id="admin-order-items-pagination"></div>' +
+          '<div class="sum-row total"><span>Total</span><span>' + PP.money(o.total) + '</span></div>' +
+          (o.payment_screenshot_url ? '<p><b>Payment Proof</b></p>' + (/\.pdf(?:$|[?#])/i.test(o.payment_screenshot_url) ? '<a class="btn ghost" href="' + o.payment_screenshot_url + '" target="_blank" rel="noopener">Open payment PDF</a>' : '<a href="' + o.payment_screenshot_url + '" target="_blank" rel="noopener"><img class="shot" src="' + o.payment_screenshot_url + '" alt="Payment proof uploaded by customer"></a>') : '<p class="muted">No payment proof uploaded.</p>') +
+          '<div class="row" style="margin-top:18px">' + btns.map((b) => '<button class="btn ' + b[2] + '" data-st="' + b[0] + '">' + b[1] + '</button>').join('') + '<button class="btn ghost" id="o-close">Close</button></div></div>';
+        document.body.appendChild(bg);
+        renderAdminOrderItems(o.items || [], 1);
+        const close = () => bg.remove();
+        bg.querySelector('#o-close').onclick = close; bg.onclick = (e) => { if (e.target === bg) close(); };
+        bg.querySelectorAll('[data-st]').forEach((b) => b.onclick = async () => {
+          b.disabled = true;
+          try { await PP.api('/orders/admin/' + o.id + '/status', { method: 'PATCH', body: { status: b.dataset.st } }); close(); flash('Order ' + (o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + ' is now ' + (STATUS[b.dataset.st] || b.dataset.st) + '.', true); loadOrders(); loadOrders('waiting_pay', 'Waiting Payment'); loadOrders('paid', 'Waiting Confirm'); }
+          catch (e) { flash(e.message); b.disabled = false; }
+        });
+      } catch (e) { flash(e.message); }
+    }
+
+    /* ---------- Chat with customers ---------- */
+    let chatId = null, chatLast = 0, chatTimer = null, listTimer = null, chatShown = {};
+    const SEND_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+    const hhmm = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dayTime = (d) => { const t = new Date(d); return t.toDateString() === new Date().toDateString() ? hhmm(d) : t.toLocaleDateString([], { month: 'short', day: 'numeric' }); };
+
+    async function loadChat() {
+      chatId = null;
+      $('tab-chat').innerHTML = '<div class="chat-admin" id="ca"><div class="chat-list" id="c-list"></div>' +
+        '<div class="chat-thread" id="c-thread"><div class="chat-empty">Select a conversation.</div></div></div>';
+      await refreshChatList();
+      clearInterval(listTimer);
+      listTimer = setInterval(() => { if (!document.hidden) refreshChatList(); }, 5000);
+    }
+
+    async function refreshChatList() {
+      try {
+        const list = await PP.api('/chat/admin/list');
+        const box = $('c-list'); if (!box) return;
+        box.innerHTML = list.length ? list.map((c) =>
+          '<button type="button" class="chat-item' + (c.id === chatId ? ' on' : '') + '" data-c="' + c.id + '">' +
+          '<b><span>' + PP.esc(c.customer_name || 'Guest') + '</span>' + (c.admin_unread && c.id !== chatId ? '<span class="unread">' + c.admin_unread + '</span>' : '') + '</b>' +
+          '<span class="snip">' + PP.esc(c.last_body || '') + '</span><span class="when">' + dayTime(c.last_message_at) + '</span></button>').join('')
+          : '<div class="chat-empty">No conversations yet.</div>';
+        box.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => openThread(+b.dataset.c));
+      } catch (e) { /* try again on the next refresh */ }
+    }
+
+    function addChatMsg(body, m) {
+      if (chatShown[m.id]) return;
+      chatShown[m.id] = true;
+      const wrap = document.createElement('div');
+      wrap.className = 'msg ' + (m.sender === 'admin' ? 'me' : 'admin');   // your replies on the right
+      const b = document.createElement('div'); b.className = 'bubble'; b.textContent = m.body;
+      const t = document.createElement('small'); t.textContent = dayTime(m.created_at);
+      wrap.appendChild(b); wrap.appendChild(t); body.appendChild(wrap);
+    }
+
+    async function pollThread(first) {
+      if (!chatId || (document.hidden && !first)) return;
+      const id = chatId;
+      try {
+        const d = await PP.api('/chat/admin/' + id + '/messages?after=' + chatLast);
+        if (id !== chatId) return;
+        $('c-name').textContent = d.customer_name || 'Guest';
+        const body = $('c-body');
+        const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+        d.messages.forEach((m) => { chatLast = Math.max(chatLast, m.id); addChatMsg(body, m); });
+        if (first || (d.messages.length && atBottom)) body.scrollTop = body.scrollHeight;
+        if (d.messages.length) pollUnread();
+      } catch (e) { /* try again in 3 seconds */ }
+    }
+
+    async function openThread(id) {
+      chatId = id; chatLast = 0; chatShown = {};
+      clearInterval(chatTimer);
+      $('ca').classList.add('open-thread');
+      $('c-thread').innerHTML =
+        '<div class="chat-thread-head"><button type="button" class="btn small back" id="c-back">Back</button><span id="c-name"></span><button type="button" class="btn small danger" id="c-delete">Delete</button></div>' +
+        '<div class="chat-body" id="c-body"></div><div class="chat-err hidden" id="c-err"></div>' +
+        '<form class="chat-form" id="c-form"><input id="c-input" maxlength="1000" placeholder="Write a reply" autocomplete="off" aria-label="Write a reply"><button class="chat-send" aria-label="Send">' + SEND_ICON + '</button></form>';
+      $('c-back').onclick = () => { $('ca').classList.remove('open-thread'); chatId = null; clearInterval(chatTimer); refreshChatList(); };
+      $('c-delete').onclick = async () => { if (!chatId || !confirm('Delete this customer chat?')) return; try { await PP.api('/chat/admin/' + chatId, { method: 'DELETE' }); $('ca').classList.remove('open-thread'); chatId = null; clearInterval(chatTimer); refreshChatList(); flash('Chat deleted.', true); } catch (e) { flash(e.message); } };
+      $('c-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const inp = $('c-input'), text = inp.value.trim(), err = $('c-err');
+        if (!text) return;
+        inp.disabled = true; err.classList.add('hidden');
+        try {
+          await PP.api('/chat/admin/' + id + '/messages', { method: 'POST', body: { body: text } });
+          inp.value = '';
+          await pollThread(true);
+        } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+        inp.disabled = false; inp.focus();
+      };
+      await pollThread(true);
+      chatTimer = setInterval(pollThread, 3000);
+      refreshChatList(); pollUnread();
+      $('c-input').focus();
+    }
+
+    /* red number on the Chat tab + browser tab title, checked every 10 seconds */
+    let baseTitle = document.title;
+    async function pollUnread() {
+      try {
+        const d = await PP.api('/chat/admin/unread');
+        const b = $('chat-badge');
+        b.textContent = d.unread; b.classList.toggle('hidden', !d.unread);
+        document.title = (d.unread ? '(' + d.unread + ') ' : '') + baseTitle;
+      } catch (e) { /* ignore */ }
+    }
+
+    (async () => {
+      await PP.layout('admin');
+      if (!PP.requireLogin(true)) return;
+      document.querySelectorAll('.admin-tabs button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+      baseTitle = document.title;
+      showTab('dash');
+      pollUnread();
+      setInterval(() => { if (!document.hidden) pollUnread(); }, 10000);
+      // new payment screenshots show up on the Orders tab without pressing refresh
+      setInterval(() => {
+        if (document.hidden || document.querySelector('.modal-bg')) return;
+        if (!$('tab-orders').classList.contains('hidden')) loadOrders();
+        if (!$('tab-waiting-pay').classList.contains('hidden')) loadOrders('waiting_pay', 'Waiting Payment');
+        if (!$('tab-waiting-confirm').classList.contains('hidden')) loadOrders('paid', 'Waiting Confirm');
+      }, 20000);
+    })();
+  </script>
+</body>
+
+</html>

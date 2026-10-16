@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/images/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Khmer:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+  <link rel="stylesheet" href="/css/style.css">
+  <title>Log in</title>
+</head>
+
+<body>
+  <header id="site-header"></header>
+  <main class="container">
+    <div class="panel auth-box">
+      <img src="/images/logo-en.png" data-lang-logo alt="PP Queen">
+      <h2 id="title">Welcome back</h2>
+      <div id="msg"></div>
+      <form id="form">
+        <div id="name-wrap" class="hidden"><label for="name">Full name</label><input id="name" autocomplete="name">
+        </div>
+        <label for="email">Email</label><input id="email" type="email" autocomplete="email" required>
+        <label for="password">Password</label><input id="password" type="password" autocomplete="current-password"
+          required>
+        <button class="btn" id="go" style="width:100%;margin-top:18px">Log in</button>
+      </form>
+      <p style="margin-top:16px" class="hidden"><a href="#" id="switch">New here? Create an account</a></p>
+    </div>
+  </main>
+  <footer id="site-footer"></footer>
+  <script src="/js/i18n.js"></script>
+  <script src="/js/app.js"></script>
+  <script>
+
+    let register = false;
+    const msg = document.getElementById('msg');
+    document.getElementById('switch').onclick = (e) => {
+      e.preventDefault(); register = !register;
+      document.getElementById('name-wrap').classList.toggle('hidden', !register);
+      document.getElementById('title').textContent = register ? 'Create your account' : 'Welcome back';
+      document.getElementById('go').textContent = register ? 'Create account' : 'Log in';
+      e.target.textContent = register ? 'Have an account? Log in' : 'New here? Create an account';
+      msg.innerHTML = '';
+    };
+    document.getElementById('form').onsubmit = async (e) => {
+      e.preventDefault(); msg.innerHTML = '';
+      try {
+        const body = { email: email.value, password: password.value };
+        if (register) body.name = document.getElementById('name').value;
+        const r = await PP.api(register ? '/auth/register' : '/auth/login', { method: 'POST', body });
+        PP.setAuth(r.token, r.user);
+        let next = new URLSearchParams(location.search).get('next') || '';
+        if (!next.startsWith('/') || next.startsWith('//')) next = '';
+        location.href = next || (r.user.role === 'admin' ? '/admin/index.html' : '/');
+      } catch (err) { msg.innerHTML = '<div class="alert error">' + PP.esc(err.message) + '</div>'; }
+    };
+    PP.layout('');
+
+  </script>
+</body>
+
+</html>
