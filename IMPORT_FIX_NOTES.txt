@@ -1,0 +1,5 @@
+PP Queen Excel import update
+- Removed the optional image-selection prompt and image file picker from the admin import workflow.
+- Import now submits only the selected .xlsx/.xls workbook.
+- Image columns are optional and do not need to be present; products import without images.
+- Existing backend route remains compatible with the same database and product validation workflow.

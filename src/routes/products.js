@@ -19,7 +19,7 @@ const importUpload = multer({
     }
   }),
   fileFilter: (req, file, cb) => {
-    if (file.fieldname === 'file') return cb(null, /\\.xlsx?$/i.test(file.originalname));
+    if (file.fieldname === 'file') return cb(null, /\.xlsx?$/i.test(file.originalname));
     if (['image/jpeg','image/png','image/webp','image/gif'].includes(file.mimetype)) return cb(null, true);
     cb(new Error('Only JPG, PNG, WEBP, or GIF product images are allowed.'));
   },

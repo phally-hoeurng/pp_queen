@@ -181,12 +181,9 @@ Use your actual public links; the site does not invent or guess them. The paymen
 
 The October UI refresh keeps the existing guest checkout, admin login, orders, payment confirmation, and chat flows while applying a shared soft-pink, white, rounded-card visual style to customer and admin pages.
 
-### Import products with matching images
+### Import products from Excel (without images)
 
-1. In Admin → Products, click **Download Excel template** and fill the rows. Supported column names include the template labels `Product Name`, `Category`, `Description`, `Price`, `Stock Quantity`, `Status`, and `Image Filename (optional)`.
-2. Set Category to `Bags` or `Shampoo` (capitalization is flexible). Status values such as `Active` and `Inactive` are recognized.
-3. For product images, put the exact image filename in `Image Filename (optional)`, for example `pink-bag.jpg`. Keep those image files on your computer and select them when the import flow asks for images. Filenames are matched case-insensitively; the image file must be JPG/JPEG, PNG, WEBP, or GIF and no larger than 5 MB.
-4. The import summary reports products created, invalid rows skipped, and images attached. Empty image cells are allowed. Rows with invalid required fields are skipped rather than creating incomplete products.
-5. If no images are needed, choose to continue without selecting images.
-
-The Excel workbook is uploaded and parsed server-side; images are stored in `public/uploads` and linked through the existing `product_images` table. Existing products and database schema are preserved.
+1. In Admin → Products, click the import icon and select an `.xlsx` or `.xls` workbook.
+2. The import runs directly without asking you to select image files. Imported products have no image unless you add one later through product management.
+3. Supported columns include `Product Name`, `Category`, `Description`, `Price`, `Stock Quantity`, and `Status`. Image columns are not required and are ignored by the simple import workflow.
+4. Required product fields and category names are validated. The import summary reports how many products were created and how many rows were skipped.

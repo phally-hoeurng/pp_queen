@@ -104,9 +104,8 @@
       try {
         products = await PP.api('/products/admin/all');
         $('tab-products').innerHTML =
-          '<div class="product-toolbar"><button class="btn" id="p-add-bag"><span aria-hidden="true">👜</span> Create Bag</button><input id="p-search" type="search" placeholder="Search by ID or name" aria-label="Search products by ID or name"><button class="btn" id="p-add-shampoo"><span aria-hidden="true">🧴</span> Create Shampoo</button></div>' +
-          '<div class="product-import-toolbar"><a class="btn ghost import-template-link" href="/templates/pp-queen-products-template.xlsx" download>↓ Download Excel template</a><button class="btn ghost" id="p-import" type="button" title="Import products and matching images">⇧ Import products</button><input id="p-import-file" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden><input id="p-import-images" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden></div>' +
-          '<div class="import-hint"><b>Quick import:</b> Choose your Excel file, then select product images. Match each image filename to the <i>Image Filename (optional)</i> column. Leave it blank for products without images. JPG, PNG, WEBP and GIF supported (max 5 MB per image).</div>' +
+          '<div class="product-toolbar"><button class="btn" id="p-add-bag"><span aria-hidden="true">👜</span> Create Bag</button><input id="p-search" type="search" placeholder="Search by ID or name" aria-label="Search products by ID or name"><button class="btn" id="p-add-shampoo"><span aria-hidden="true">🧴</span> Create Shampoo</button><button class="btn ghost icon-only" id="p-import" type="button" title="Import products from Excel" aria-label="Import products">' + IMPORT_ICON + '</button><input id="p-import-file" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden></div>' +
+          '<div class="import-hint"><b>Excel import:</b> Select an .xlsx or .xls file. Products will be imported without images.</div>' +
           '<div id="p-table"></div>';
         $('p-add-shampoo').onclick = () => productForm(null, false, 'Shampoo');
         $('p-import').onclick = () => $('p-import-file').click();
@@ -114,27 +113,22 @@
           const f = e.target.files && e.target.files[0];
           if (!f) return;
           if (!/\.xlsx?$/i.test(f.name)) { flash('Please select an Excel .xlsx or .xls file.', false); e.target.value = ''; return; }
-          const imageInput = $('p-import-images');
-          const go = async () => {
-            const fd = new FormData(); fd.append('file', f);
-            Array.from(imageInput.files || []).forEach(img => fd.append('images', img, img.name));
-            const b = $('p-import'); b.disabled = true; b.classList.add('busy');
-            try {
-              const result = await PP.api('/products/admin/import', {method:'POST', body:fd});
-              let message = 'Imported ' + result.created + ' product(s). Skipped rows: ' + result.skipped + '.';
-              if (result.imagesAttached) message += ' Images attached: ' + result.imagesAttached + '.';
-              if (result.imagesUploaded > result.imagesAttached) message += ' Unmatched images: ' + (result.imagesUploaded - result.imagesAttached) + '. Check filenames in Excel.';
-              flash(message, result.created > 0 || result.skipped === 0);
-              await loadProducts();
-            } catch(err) { flash(err.message || 'Import failed.', false); }
-            finally { b.disabled = false; b.classList.remove('busy'); e.target.value = ''; imageInput.value = ''; imageInput.onchange = null; }
-          };
-          imageInput.onchange = go;
-          if (imageInput.files && imageInput.files.length) await go();
-          else {
-            const choose = confirm('Do you want to select product images too? Click OK to choose images, or Cancel to import without images.');
-            if (choose) imageInput.click();
-            else await go();
+          const fd = new FormData();
+          fd.append('file', f);
+          const b = $('p-import');
+          b.disabled = true;
+          b.classList.add('busy');
+          try {
+            const result = await PP.api('/products/admin/import', {method:'POST', body:fd});
+            let message = 'Imported ' + result.created + ' product(s). Skipped rows: ' + result.skipped + '.';
+            flash(message, result.created > 0 || result.skipped === 0);
+            await loadProducts();
+          } catch(err) {
+            flash(err.message || 'Import failed.', false);
+          } finally {
+            b.disabled = false;
+            b.classList.remove('busy');
+            e.target.value = '';
           }
         };
         $('p-add-bag').onclick = () => productForm(null, false, 'Bags');

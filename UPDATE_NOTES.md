@@ -31,5 +31,12 @@ Back up the database before deploying. The app runs `db/schema.sql` on startup a
 ## October 2026 UI and product import update
 - Applied a consistent soft-pink/white design refresh across shared site components and admin product management.
 - Added a direct Excel template download and clearer import instructions.
-- Excel import accepts the template's exact headers, flexible capitalization, status, and image filename column.
-- Import accepts matching image files in the same request and links them to the created product without changing the existing database workflow.
+- Excel import accepts supported product headers and flexible capitalization; image columns are not required.
+- Admin Excel import now submits only the workbook; no image-selection prompt is shown, and imported products can have no image.
+
+
+## October 17, 2026 admin product toolbar polish
+- Removed the Download Excel Template button/link from the Products screen.
+- Kept the Excel import workflow and moved its icon-only control into the same toolbar row as Create Bag, search, and Create Shampoo.
+- Made Create Bag and Create Shampoo equal-width/equal-height controls with responsive mobile layout.
+- Refined product toolbar and category panels with softer pink borders, spacing, hover states, and responsive sizing.

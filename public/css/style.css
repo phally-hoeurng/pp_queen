@@ -5179,3 +5179,60 @@ th {
     max-height: 160px;
   }
 }
+
+/* PP Queen admin products: one balanced toolbar row matching the approved reference */
+#tab-products .product-toolbar {
+  grid-template-columns: minmax(145px, 180px) minmax(220px, 1fr) minmax(160px, 180px) 44px;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  margin: 16px 0 10px;
+  background: linear-gradient(115deg, #fff 0%, #fff8fb 100%);
+  border: 1px solid #f8dce8;
+  border-radius: 18px;
+  box-shadow: 0 8px 28px rgba(212, 69, 122, .07);
+}
+#tab-products .product-toolbar > button {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  min-height: 42px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+#tab-products #p-add-bag, #tab-products #p-add-shampoo {
+  min-width: 0;
+  padding-inline: 12px;
+}
+#tab-products .product-toolbar > input {
+  grid-column: auto; grid-row: auto; width: 100%; min-width: 0;
+  height: 42px; min-height: 42px; border-radius: 12px;
+  border: 1px solid #f0dce5; background: #fff; padding: 0 15px;
+  box-shadow: inset 0 1px 2px rgba(60, 20, 40, .025);
+}
+#tab-products #p-import {
+  width: 44px; min-width: 44px; padding: 0; color: var(--pink-deep);
+  background: #fff; border: 1px solid #f5d5e2;
+  box-shadow: 0 3px 12px rgba(212, 69, 122, .06);
+}
+#tab-products #p-import:hover { background: #fff0f6; transform: translateY(-1px); }
+#tab-products #p-import svg { width: 20px; height: 20px; }
+#tab-products .import-hint { margin: 0 0 18px; background: #fffafd; border-style: solid; border-color: #f8e3ec; }
+#tab-products .product-list-block { border-radius: 18px; box-shadow: 0 8px 28px rgba(212, 69, 122, .045); }
+#tab-products .empty { border-radius: 13px; background: linear-gradient(145deg, #fffafd, #fff); padding: 32px 16px; color: #827482; }
+@media (max-width: 760px) {
+  #tab-products .product-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 10px; padding: 12px; }
+  #tab-products .product-toolbar > input { grid-column: 1 / -1; grid-row: 1; }
+  #tab-products #p-add-bag { grid-column: 1; grid-row: 2; }
+  #tab-products #p-add-shampoo { grid-column: 2; grid-row: 2; }
+  #tab-products #p-import { grid-column: 3; grid-row: 2; }
+}
+@media (max-width: 420px) {
+  #tab-products .product-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px; gap: 7px; padding: 10px; }
+  #tab-products #p-add-bag, #tab-products #p-add-shampoo { font-size: .82rem; padding-inline: 5px; }
+  #tab-products #p-import { width: 40px; min-width: 40px; }
+}
