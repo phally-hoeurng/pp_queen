@@ -5,6 +5,7 @@ const path = require('path');
 const pool = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { upload, UPLOAD_DIR } = require('../upload');
+const { storedFileUrl, persistUploadedFiles, deleteStoredFile, removeIfUnreferenced } = require('../storage');
 
 const router = express.Router();
 const importUpload = multer({
@@ -44,7 +45,7 @@ async function withImages(products) {
   const map = {};
   imgs.rows.forEach((i) => {
     (map[i.product_id] = map[i.product_id] || []).push({
-      id: i.id, url: '/uploads/' + i.filename, is_main: i.is_main
+      id: i.id, url: storedFileUrl(i.filename), is_main: i.is_main
     });
   });
   return products.map((p) => ({
@@ -73,7 +74,7 @@ function localizeProduct(p, lang) {
 
 function removeFile(filename) {
   if (!filename) return;
-  fs.unlink(path.join(UPLOAD_DIR, path.basename(filename)), () => {});
+  deleteStoredFile(filename).catch((err) => console.error('Image cleanup failed:', err.message));
 }
 
 function cleanText(v, max) {
@@ -278,6 +279,7 @@ router.post('/admin/import', requireAdmin, importUpload.fields([{ name: 'file', 
     if (!sheet) return res.status(400).json({ error: 'The workbook has no worksheet.' });
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
     if (!rows.length) return res.status(400).json({ error: 'The worksheet contains no product rows.' });
+    await persistUploadedFiles(uploadedImages, 'imports');
     const keyOf = (row, aliases) => {
       const keys = Object.keys(row);
       for (const alias of aliases) {
@@ -338,13 +340,14 @@ router.post('/admin/import', requireAdmin, importUpload.fields([{ name: 'file', 
     // Images not matched to a row are not needed; remove them to avoid orphaned uploads.
     for (const f of uploadedImages) {
       if (imageByName.get(path.basename(f.originalname).toLowerCase()) === f) {
-        try { fs.unlinkSync(f.path); } catch (_) {}
+        await deleteStoredFile(f.filename).catch((err) => console.error('Unmatched import image cleanup failed:', err.message));
+        if (f.path) { try { fs.unlinkSync(f.path); } catch (_) {} }
       }
     }
     res.json({ created, skipped, imagesAttached, imagesUploaded: uploadedImages.length, unmatchedImages: Math.max(0, uploadedImages.length - imagesAttached) });
   } catch (err) {
     console.error('Product import failed:', err);
-    res.status(400).json({ error: err.message && /Excel|workbook|image|file|worksheet/i.test(err.message) ? err.message : 'Could not import this workbook. Check the template columns, prices, stock quantities, and category names.' });
+    res.status(400).json({ error: err.message && /Excel|workbook|image|file|worksheet|Supabase Storage|permanent image storage/i.test(err.message) ? err.message : 'Could not import this workbook. Check the template columns, prices, stock quantities, and category names.' });
   } finally {
     for (const f of saved) {
       if (f === workbookFile?.path) { try { fs.unlinkSync(f); } catch (_) {} }
@@ -387,6 +390,7 @@ async function verifyCategory(category) {
 router.post('/', requireAdmin, upload.array('images', 10), async (req, res) => {
   const files = req.files || [];
   try {
+    await persistUploadedFiles(files, 'products');
     const v = validateProduct(req.body);
     if (!v) {
       files.forEach((f) => removeFile(f.filename));
@@ -413,15 +417,20 @@ router.post('/', requireAdmin, upload.array('images', 10), async (req, res) => {
   } catch (err) {
     files.forEach((f) => removeFile(f.filename));
     console.error(err);
-    res.status(500).json({ error: 'Could not save product.' });
+    const message = err.code === 'SUPABASE_STORAGE_NOT_CONFIGURED' || /^Supabase Storage upload failed/.test(err.message || '') ? err.message : 'Could not save product.';
+    res.status(500).json({ error: message });
   }
 });
 
 router.put('/:id(\\d+)', requireAdmin, upload.array('images', 10), async (req, res) => {
   const files = req.files || [];
+  const client = await pool.connect();
+  const removedAfterCommit = [];
+  let transactionStarted = false;
   try {
+    await persistUploadedFiles(files, 'products');
     const id = req.params.id;
-    const cur = await pool.query('SELECT * FROM products WHERE id=$1', [id]);
+    const cur = await client.query('SELECT * FROM products WHERE id=$1', [id]);
     if (!cur.rowCount) {
       files.forEach((f) => removeFile(f.filename));
       return res.status(404).json({ error: 'Product not found.' });
@@ -437,66 +446,75 @@ router.put('/:id(\\d+)', requireAdmin, upload.array('images', 10), async (req, r
     }
     let toRemove = [];
     try { toRemove = JSON.parse(req.body.removeImages || '[]').map(Number).filter(Number.isInteger); } catch (_) {}
-    const existing = await pool.query('SELECT id,filename FROM product_images WHERE product_id=$1', [id]);
+    const existing = await client.query('SELECT id,filename FROM product_images WHERE product_id=$1', [id]);
     const remaining = existing.rows.filter((x) => !toRemove.includes(x.id)).length + files.length;
     if (remaining > 10) {
       files.forEach((f) => removeFile(f.filename));
       return res.status(400).json({ error: 'A product can have at most 10 images.' });
     }
 
-    await pool.query(
+    await client.query('BEGIN');
+    transactionStarted = true;
+    await client.query(
       `UPDATE products SET name=$1,name_km=$2,name_zh=$3,price=$4,stock=$5,category=$6,description=$7,
        description_km=$8,description_zh=$9,active=$10,audience=$11 WHERE id=$12`,
       [v.name,v.name_km,v.name_zh,v.price,v.stock,v.category,v.description,v.description_km,v.description_zh,v.active,v.audience,id]
     );
 
     if (toRemove.length) {
-      const del = await pool.query(
+      const del = await client.query(
         'DELETE FROM product_images WHERE product_id=$1 AND id=ANY($2) RETURNING filename',
         [id,toRemove]
       );
-      del.rows.forEach((d) => removeFile(d.filename));
+      removedAfterCommit.push(...del.rows.map((d) => d.filename));
     }
-    for (const f of files) await pool.query(
+    for (const f of files) await client.query(
       'INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,FALSE,$3)',
       [id,f.filename,existing.rows.length + files.indexOf(f)]
     );
 
     let layout = null; try { const l = JSON.parse(req.body.layout || 'null'); if (Array.isArray(l)) layout = l.map(String); } catch (_) {}
     if (layout) {
-      const rows = await pool.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC LIMIT $2', [id, files.length]);
+      const rows = await client.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC LIMIT $2', [id, files.length]);
       const newIds = rows.rows.map((r) => r.id).reverse(); // same order as the uploaded files
       const resolve = (key) => key.startsWith('old:') ? Number(key.slice(4)) : key.startsWith('new:') ? newIds[Number(key.slice(4))] : NaN;
       let pos = 0;
       for (const key of layout) {
         const imgId = resolve(key);
-        if (Number.isInteger(imgId)) await pool.query('UPDATE product_images SET sort_order=$1 WHERE id=$2 AND product_id=$3', [pos++, imgId, id]);
+        if (Number.isInteger(imgId)) await client.query('UPDATE product_images SET sort_order=$1 WHERE id=$2 AND product_id=$3', [pos++, imgId, id]);
       }
       const mainId = resolve(String(req.body.main || ''));
-      if (Number.isInteger(mainId)) await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2', [mainId, id]);
+      if (Number.isInteger(mainId)) await client.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2', [mainId, id]);
     }
     let imageOrder = []; if (!layout) try { imageOrder = JSON.parse(req.body.imageOrder || '[]').map(Number).filter(Number.isInteger); } catch (_) {}
-    for (let i=0;i<imageOrder.length;i++) await pool.query('UPDATE product_images SET sort_order=$1 WHERE id=$2 AND product_id=$3', [i,imageOrder[i],id]);
+    for (let i=0;i<imageOrder.length;i++) await client.query('UPDATE product_images SET sort_order=$1 WHERE id=$2 AND product_id=$3', [i,imageOrder[i],id]);
     const mainNewImageIndex = layout ? NaN : Number(req.body.mainNewImageIndex);
-    if (Number.isInteger(mainNewImageIndex) && mainNewImageIndex >= 0 && files[mainNewImageIndex]) { const newest = await pool.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC OFFSET $2 LIMIT 1', [id, files.length - 1 - mainNewImageIndex]); if (newest.rowCount) await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2',[newest.rows[0].id,id]); }
+    if (Number.isInteger(mainNewImageIndex) && mainNewImageIndex >= 0 && files[mainNewImageIndex]) { const newest = await client.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC OFFSET $2 LIMIT 1', [id, files.length - 1 - mainNewImageIndex]); if (newest.rowCount) await client.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2',[newest.rows[0].id,id]); }
     const mainImageId = layout ? 0 : Number(req.body.mainImageId);
     if (Number.isInteger(mainImageId) && mainImageId > 0) {
-      await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2',[mainImageId,id]);
+      await client.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2',[mainImageId,id]);
     }
-    const main = await pool.query('SELECT id FROM product_images WHERE product_id=$1 AND is_main=TRUE',[id]);
+    const main = await client.query('SELECT id FROM product_images WHERE product_id=$1 AND is_main=TRUE',[id]);
     if (!main.rowCount) {
-      await pool.query(
+      await client.query(
         'UPDATE product_images SET is_main=TRUE WHERE id=(SELECT id FROM product_images WHERE product_id=$1 ORDER BY id LIMIT 1)',
         [id]
       );
     }
-    const r = await pool.query('SELECT * FROM products WHERE id=$1',[id]);
+    const r = await client.query('SELECT * FROM products WHERE id=$1',[id]);
+    await client.query('COMMIT');
+    transactionStarted = false;
+    for (const filename of removedAfterCommit) await removeIfUnreferenced(pool, filename);
     const [full] = await withImages(r.rows);
     res.json(full);
   } catch (err) {
-    files.forEach((f) => removeFile(f.filename));
+    if (transactionStarted) await client.query('ROLLBACK').catch(() => {});
+    for (const f of files) await removeIfUnreferenced(pool, f.filename);
     console.error(err);
-    res.status(500).json({ error: 'Could not update product.' });
+    const message = err.code === 'SUPABASE_STORAGE_NOT_CONFIGURED' || /^Supabase Storage upload failed/.test(err.message || '') ? err.message : 'Could not update product. The previous saved images have been preserved if the database update failed.';
+    res.status(500).json({ error: message });
+  } finally {
+    client.release();
   }
 });
 
@@ -505,7 +523,7 @@ router.delete('/:id(\\d+)', requireAdmin, async (req,res) => {
     const imgs = await pool.query('SELECT filename FROM product_images WHERE product_id=$1',[req.params.id]);
     const r = await pool.query('DELETE FROM products WHERE id=$1',[req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error:'Product not found.' });
-    imgs.rows.forEach((i)=>removeFile(i.filename));
+    for (const i of imgs.rows) await removeIfUnreferenced(pool, i.filename);
     res.json({ok:true});
   } catch(err) {
     console.error(err);

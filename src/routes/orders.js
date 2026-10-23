@@ -7,6 +7,7 @@ const { requireAuth, optionalAuth, requireAdmin } = require('../middleware/auth'
 const { upload, paymentProofUpload, UPLOAD_DIR } = require('../upload');
 const { sendTelegram, sendTelegramPhoto, esc } = require('../telegram');
 const { rateLimit } = require('../ratelimit');
+const { storedFileUrl } = require('../storage');
 
 const router = express.Router();
 const CUR = () => process.env.CURRENCY || '$';
@@ -27,7 +28,7 @@ async function loadOrder(id, lang = 'en') {
   );
   const order = o.rows[0];
   order.total = Number(order.total);
-  order.items = items.rows.map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? '/uploads/' + i.product_image : null }));
+  order.items = items.rows.map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? storedFileUrl(i.product_image) : null }));
   order.payment_screenshot_url = order.payment_screenshot ? '/uploads/' + order.payment_screenshot : null;
   return order;
 }
@@ -142,7 +143,7 @@ router.get('/mine', requireAuth, async (req, res) => {
              WHERE oi.order_id = o.id) AS items
      FROM orders o WHERE o.user_id = $1 ORDER BY o.created_at DESC`, [req.user.id, ['km','zh'].includes(req.query.lang) ? req.query.lang : 'en']
   );
-  res.json(r.rows.map((o) => ({ ...o, total: Number(o.total), product_image: o.product_image ? '/uploads/' + o.product_image : null, items: (o.items || []).map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? '/uploads/' + i.product_image : null })) })));
+  res.json(r.rows.map((o) => ({ ...o, total: Number(o.total), product_image: o.product_image ? storedFileUrl(o.product_image) : null, items: (o.items || []).map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? storedFileUrl(i.product_image) : null })) })));
 });
 
 // "My orders" for guests: the browser sends the orders it remembers
@@ -171,7 +172,7 @@ router.post(
       res.json(
         r.rows
           .filter((o) => sameToken(o.public_token, tokens.get(o.id)))
-          .map((o) => ({ id: o.id, order_code: o.order_code, total: Number(o.total), status: o.status, created_at: o.created_at, product_name: o.product_name, product_image: o.product_image ? '/uploads/' + o.product_image : null, item_count: o.item_count, items: (o.items || []).map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? '/uploads/' + i.product_image : null })) }))
+          .map((o) => ({ id: o.id, order_code: o.order_code, total: Number(o.total), status: o.status, created_at: o.created_at, product_name: o.product_name, product_image: o.product_image ? storedFileUrl(o.product_image) : null, item_count: o.item_count, items: (o.items || []).map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? storedFileUrl(i.product_image) : null })) }))
       );
     } catch (err) {
       console.error(err);
@@ -283,7 +284,7 @@ router.get('/admin/stats', requireAdmin, async (req, res) => {
     todaySales: Number(today.rows[0].sales),
     pendingOrders: pending.rows[0].n,
     paidOrders: paid.rows[0].n,
-    lowStock: low.rows,
+    lowStock: low.rows.map((p) => ({ ...p, image: p.image ? storedFileUrl(p.image) : null })),
     last7: days.rows.map((d) => ({ day: d.day, sales: Number(d.sales) }))
   });
 });

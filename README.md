@@ -187,3 +187,23 @@ The October UI refresh keeps the existing guest checkout, admin login, orders, p
 2. The import runs directly without asking you to select image files. Imported products have no image unless you add one later through product management.
 3. Supported columns include `Product Name`, `Category`, `Description`, `Price`, `Stock Quantity`, and `Status`. Image columns are not required and are ignored by the simple import workflow.
 4. Required product fields and category names are validated. The import summary reports how many products were created and how many rows were skipped.
+
+## Permanent product image storage (Supabase Storage)
+
+Product images uploaded through Admin → Products are stored in Supabase Storage rather than relying on the web host's local `public/uploads` directory. The database keeps a storage reference, and the app builds the public image URL from that reference when products load. Existing local `/uploads/...` image records remain readable for backward compatibility.
+
+### One-time setup
+
+1. In Supabase, open **Storage** and create a **public** bucket named `product-images`.
+2. On the server hosting PP Queen, set these environment variables (do not put the service-role key in frontend JavaScript):
+
+```env
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVER_SIDE_SERVICE_ROLE_KEY
+SUPABASE_STORAGE_BUCKET=product-images
+```
+
+3. Restart the server. Product-image uploads will fail with a clear configuration error rather than silently claiming that a local-only upload is permanent if Supabase is not configured. The server-side service-role key must be kept secret.
+4. To migrate existing product images currently recorded in PostgreSQL and stored in `public/uploads`, back up the database and uploads folder first, then run `npm run migrate:images`. The migration updates each product-image record only after its image uploads successfully and keeps the local originals as a backup.
+
+New product uploads use unique object names and do not overwrite existing Storage files. Product images remain available across browser refreshes and app deployments as long as the Supabase project and bucket remain active and the files are not deleted. This is persistent storage, not a substitute for backups. Payment-proof screenshots remain on the existing upload flow and should be moved to a separate private bucket before treating them as permanent cloud files.
