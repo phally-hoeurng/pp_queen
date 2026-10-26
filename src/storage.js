@@ -15,6 +15,7 @@ function config() {
   }
   return { base, key };
 }
+
 function isSupabaseRef(value) {
   return typeof value === 'string' && value.startsWith(REF_PREFIX);
 }
@@ -62,9 +63,7 @@ function storedFileUrl(value) {
     return '/uploads/' + encodeURIComponent(path.basename(String(value)));
   }
   const base = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-  if (!base) {
-    return null;
-  }
+  if (!base) return null;
   return `${base}/storage/v1/object/public/${encodeURIComponent(ref.bucket)}/${encodePath(ref.objectPath)}`;
 }
 

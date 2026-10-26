@@ -101,7 +101,6 @@ const PP = {
     location.href = '/';
   },
 
-  // Use on pages that need a login. Sends the visitor to /login.html and back.
   requireLogin(adminOnly) {
     const u = PP.user();
 
@@ -182,7 +181,7 @@ const PP = {
     return data;
   },
 
-  // ----- cart (saved in the browser: [{id, qty}]) -----
+  // ----- cart -----
   cart() {
     try {
       return JSON.parse(localStorage.getItem('pp_cart')) || [];
@@ -229,7 +228,7 @@ const PP = {
     });
   },
 
-  // ----- guest orders (no login: the browser remembers {id, token, total, status}) -----
+  // ----- guest orders -----
   myOrders() {
     try {
       return JSON.parse(localStorage.getItem('pp_orders')) || [];
@@ -259,7 +258,6 @@ const PP = {
     return f ? f.token : '';
   },
 
-  // remembers the delivery details so the next order is quicker
   customer() {
     try {
       return JSON.parse(localStorage.getItem('pp_cust')) || {};
@@ -272,8 +270,6 @@ const PP = {
     localStorage.setItem('pp_cust', JSON.stringify(c));
   },
 
-  // Shrinks big phone screenshots before upload (faster, and avoids the 5 MB limit).
-  // Falls back to the original file if anything goes wrong.
   async compressImage(file, maxSide, quality) {
     maxSide = maxSide || 2200;
     quality = quality || 0.86;
@@ -332,9 +328,7 @@ const PP = {
       return new File(
         [blob],
         file.name.replace(/\.\w+$/, '') + '.jpg',
-        {
-          type: 'image/jpeg'
-        }
+        { type: 'image/jpeg' }
       );
 
     } catch (e) {
@@ -342,7 +336,7 @@ const PP = {
     }
   },
 
-  // ----- chat box (code is in /js/chat.js) -----
+  // ----- chat box -----
   loadChat() {
     if (PP._chatLoading) return;
 
@@ -385,12 +379,8 @@ const PP = {
   async layout(active) {
     try {
       PP.config = await (await fetch('/api/config')).json();
-    } catch (e) {
-      /* keep defaults */
-    }
+    } catch (e) { }
 
-    // Refresh the logged-in user from the database before drawing the header.
-    // This keeps the Admin link correct after an account is promoted/demoted.
     if (PP.token()) {
       try {
         const r = await fetch('/api/auth/me', {
@@ -401,20 +391,12 @@ const PP = {
 
         if (r.ok) {
           const data = await r.json();
-
-          localStorage.setItem(
-            'pp_user',
-            JSON.stringify(data.user)
-          );
-
+          localStorage.setItem('pp_user', JSON.stringify(data.user));
         } else if (r.status === 401) {
           localStorage.removeItem('pp_token');
           localStorage.removeItem('pp_user');
         }
-
-      } catch (e) {
-        /* keep existing session state */
-      }
+      } catch (e) { }
     }
 
     document
@@ -429,6 +411,17 @@ const PP = {
 
     const u = PP.user();
 
+    // Query unconfirmed order count for the Admin menu item
+    let adminPendingCount = 0;
+    if (u && u.role === 'admin') {
+      try {
+        const stats = await (await fetch('/api/orders/admin/stats', {
+          headers: { Authorization: 'Bearer ' + PP.token() }
+        })).json();
+        adminPendingCount = Number(stats.paidOrders || 0);
+      } catch (e) { }
+    }
+
     const header = document.getElementById('site-header');
 
     if (header) {
@@ -438,8 +431,6 @@ const PP = {
       const selectedCategory = new URLSearchParams(location.search).get('category');
       const link = (href, key, text) => '<a href="' + href + '"' + (active === key ? ' class="active"' : '') + '>' + text + '</a>';
       const categoryLink = (name, label) => '<a href="' + catUrl(name) + '"' + (selectedCategory === name ? ' class="active"' : '') + '>' + label + '</a>';
-      const unpaid = PP.myOrders().filter((o) => o.status === 'waiting_pay').length;
-
       const bagIcon = '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 7h12l1 13H5L6 7z"/><path d="M9 7a3 3 0 0 1 6 0"/></svg>';
 
       header.innerHTML =
@@ -449,8 +440,8 @@ const PP = {
         '<a class="shop-nav-link' + (!selectedCategory && active === 'home' ? ' active' : '') + '" href="/">PP Queen Shop</a>' +
         categoryLink('Bags', PP.icons.bags + '<span>Bags</span>') +
         categoryLink('Shampoo', PP.icons.shampoo + '<span>Shampoo</span>') +
-        link('/orders.html', 'orders', 'My orders' + (unpaid ? '<span class="nav-badge" title="Waiting for payment">' + unpaid + '</span>' : '')) +
-        (u && u.role === 'admin' ? link('/admin/index.html', 'admin', 'Admin') : '') +
+        link('/orders.html', 'orders', 'My orders') +
+        (u && u.role === 'admin' ? link('/admin/index.html', 'admin', 'Admin' + (adminPendingCount > 0 ? '<span class="nav-badge" title="Waiting Confirm">' + adminPendingCount + '</span>' : '')) : '') +
         '</nav>' +
         '<div class="header-right">' +
         '<div class="lang-menu" id="lang-menu"><button type="button" class="lang-btn" id="lang-btn" aria-haspopup="true" aria-expanded="false" aria-label="Language: ' + PP.langNames[PP.lang] + '" title="' + PP.langNames[PP.lang] + '">' + PP.flags[PP.lang] + '</button><div class="lang-list" id="lang-list" role="menu">' + ['en', 'km', 'zh'].map((l) => '<button type="button" role="menuitem" class="lang-opt' + (l === PP.lang ? ' on' : '') + '" data-lang="' + l + '" aria-label="' + PP.langNames[l] + '" title="' + PP.langNames[l] + '">' + PP.flags[l] + '</button>').join('') + '</div></div>' +
@@ -480,25 +471,16 @@ const PP = {
       onScroll();
     }
 
-    const footer =
-      document.getElementById('site-footer');
-
+    const footer = document.getElementById('site-footer');
     if (footer) {
       footer.className = 'site-footer';
-
       footer.innerHTML =
         '<div class="container">' +
         '<div class="footer-grid">' +
-
         '<div>' +
-        '<img class="footer-logo" src="/images/logo-' +
-        PP.lang +
-        '.png" alt="' +
-        PP.esc(PP.config.name) +
-        '">' +
+        '<img class="footer-logo" src="/images/logo-' + PP.lang + '.png" alt="' + PP.esc(PP.config.name) + '">' +
         '<p style="margin-top:12px">Pretty things for every queen.</p>' +
         '</div>' +
-
         '<div>' +
         '<h4>Quick links</h4>' +
         '<a href="/"><span class="footer-link-icon" aria-hidden="true">⌂</span> Shop</a>' +
@@ -506,39 +488,20 @@ const PP = {
         '<a href="/orders.html"><span class="footer-link-icon" aria-hidden="true">▤</span> My orders</a>' +
         '<a href="#chat" data-open-chat><span class="footer-link-icon" aria-hidden="true">✉</span> Chat with us</a>' +
         '</div>' +
-
         '<div>' +
         '<h4>Contact</h4>' +
-
-        (
-          PP.config.phone
-            ? '<p><span class="footer-link-icon" aria-hidden="true">☎</span> Phone: ' +
-            PP.esc(PP.config.phone) +
-            '</p>'
-            : ''
-        ) +
-
+        (PP.config.phone ? '<p><span class="footer-link-icon" aria-hidden="true">☎</span> Phone: ' + PP.esc(PP.config.phone) + '</p>' : '') +
         (PP.config.facebookUrl ? '<p><a href="' + PP.esc(PP.config.facebookUrl) + '" target="_blank" rel="noopener noreferrer"><span class="footer-link-icon" aria-hidden="true">f</span> Facebook Page</a></p>' : '') +
         (PP.config.telegramUrl ? '<p><a href="' + PP.esc(PP.config.telegramUrl) + '" target="_blank" rel="noopener noreferrer"><span class="footer-link-icon" aria-hidden="true">➤</span> Telegram Group</a></p>' : '') +
         (PP.config.address ? '<p><span class="footer-link-icon" aria-hidden="true">⌖</span> ' + PP.esc(PP.config.address) + '</p>' : '') +
-
         '<p>Pay by QR. Order updates come to you fast.</p>' +
-
         '</div>' +
-
         '</div>' +
-
-        '<div class="copyright">© ' +
-        new Date().getFullYear() +
-        ' ' +
-        PP.esc(PP.config.name) +
-        '. All rights reserved.</div>' +
-
+        '<div class="copyright">© ' + new Date().getFullYear() + ' ' + PP.esc(PP.config.name) + '. All rights reserved.</div>' +
         '</div>';
     }
 
     PP._noChat = active === 'admin';
-
     if (!PP._noChat) {
       PP.loadChat();
     }

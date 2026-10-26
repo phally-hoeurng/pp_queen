@@ -11,7 +11,6 @@ const MIME = {
   '.pdf': 'application/pdf'
 };
 
-// Sends a message to Telegram. Never throws.
 async function sendTelegram(text) {
   const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID || process.env.TG_CHAT_ID;
@@ -39,14 +38,12 @@ async function sendTelegram(text) {
   }
 }
 
-// Sends the picture to Telegram with caption.
-// Accepts either a local file path OR a remote public URL (e.g. Supabase Storage URL).
 async function sendTelegramPhoto(target, caption) {
   const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID || process.env.TG_CHAT_ID;
   if (!token || !chatId || !target) return false;
 
-  // 1. If target is a remote Supabase URL, send via Telegram URL fetching (most reliable)
+  // 1. If target is a remote Supabase URL
   if (typeof target === 'string' && (target.startsWith('http://') || target.startsWith('https://'))) {
     const isPdf = /\.pdf(?:$|[?#])/i.test(target);
     const method = isPdf ? 'sendDocument' : 'sendPhoto';
@@ -71,7 +68,7 @@ async function sendTelegramPhoto(target, caption) {
     }
   }
 
-  // 2. If target is a local file path on disk, send as multipart form-data
+  // 2. If target is a local file
   try {
     if (typeof target === 'string' && fs.existsSync(target)) {
       const buf = await fs.promises.readFile(target);
@@ -104,11 +101,9 @@ async function sendTelegramPhoto(target, caption) {
     console.error('Telegram local file send failed:', err.message);
   }
 
-  // Fallback text if image could not be delivered
   return sendTelegram(caption);
 }
 
-// Escape user text for Telegram HTML mode
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')

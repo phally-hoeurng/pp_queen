@@ -55,8 +55,31 @@
         const local = PP.myOrders();
         if (local.length) {
           try {
-            const found = await PP.api('/orders/lookup?lang=' + encodeURIComponent(PP.lang), { method: 'POST', body: { orders: local.map(o => ({ id: o.id, token: o.token })) } });
-            found.forEach(o => PP.saveOrder({ id: o.id, status: o.status, total: o.total }));
+            const found = await PP.api('/orders/lookup?lang=' + encodeURIComponent(PP.lang), {
+              method: 'POST',
+              body: { orders: local.map(o => ({ id: o.id, token: o.token })) }
+            });
+
+            // Keep only orders that still exist on server
+            const validMap = new Map(found.map(o => [String(o.id), o]));
+            const updatedLocal = local
+              .filter(o => validMap.has(String(o.id)))
+              .map(o => ({ ...o, status: validMap.get(String(o.id)).status, total: validMap.get(String(o.id)).total }));
+
+            localStorage.setItem('pp_orders', JSON.stringify(updatedLocal));
+
+            // Sync top navigation badge immediately
+            const unpaid = updatedLocal.filter(o => o.status === 'waiting_pay').length;
+            const badge = document.querySelector('.site-header .nav-badge');
+            if (badge) {
+              if (unpaid > 0) {
+                badge.textContent = unpaid;
+                badge.style.display = '';
+              } else {
+                badge.remove();
+              }
+            }
+
             rows = found.map(o => Object.assign({}, o, { token: PP.orderToken(o.id) }));
           } catch (e) { rows = local.slice(); }
         }
@@ -71,7 +94,13 @@
         view.querySelector('#retry-orders').onclick = () => location.reload(); return;
       }
       rows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0) || Number(b.id) - Number(a.id));
-      if (!rows.length) { view.innerHTML = '<div class="empty"><p>You have no orders yet.</p><a class="btn" href="/">Start shopping</a></div>'; return; }
+      if (!rows.length) {
+        // If there are no rows, ensure no badge shows
+        const badge = document.querySelector('.site-header .nav-badge');
+        if (badge) badge.remove();
+        view.innerHTML = '<div class="empty"><p>You have no orders yet.</p><a class="btn" href="/">Start shopping</a></div>';
+        return;
+      }
       const PAGE_SIZE = 10; let currentPage = 1, searchOrderId = '', statusFilter = '', dateFilter = '';
       const dateOnly = d => { if (!d) return ''; const x = new Date(d); return isNaN(x) ? '' : x.toISOString().slice(0, 10); };
 

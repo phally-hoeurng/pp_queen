@@ -8,7 +8,6 @@ const router = express.Router();
 const TOKEN_RE = /^[a-f0-9]{32}$/;
 const clip = (v, n) => String(v == null ? '' : v).replace(/\r\n/g, '\n').trim().slice(0, n);
 
-// Base URL helper for clickable links in Telegram
 function getBaseUrl(req) {
   if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '');
@@ -17,8 +16,6 @@ function getBaseUrl(req) {
   const proto = req && (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https') ? 'https' : 'https';
   return `${proto}://${host}`;
 }
-
-// ---------- Customer (no login, identified by a random token in the browser) ----------
 
 function chatToken(req, res, next) {
   const t = String(req.headers['x-chat-token'] || '');
@@ -78,7 +75,6 @@ router.post(
       const existing = await pool.query('SELECT id, customer_name FROM chats WHERE token = $1', [req.chatToken]);
       const currentName = existing.rowCount ? String(existing.rows[0].customer_name || '').trim() : '';
 
-      // Customer name is required if not set before
       const resolvedName = name || currentName;
       if (!resolvedName) {
         return res.status(400).json({ error: 'Please enter your name to start chat.' });
@@ -112,7 +108,6 @@ router.post(
   }
 );
 
-// Customers can edit/delete only their own messages, verified by their private chat token.
 router.put('/messages/:messageId(\\d+)', chatToken, async (req, res) => {
   try {
     const body = clip(req.body && req.body.body, 1000);
@@ -215,7 +210,7 @@ router.put('/admin/:id(\\d+)/messages/:messageId(\\d+)', requireAdmin, async (re
   } catch (err) { console.error(err); res.status(500).json({ error: 'Could not edit message.' }); }
 });
 
-router.delete('/admin/:id(\\d+)', requireAdmin, async (req, res) => {
+router.delete('/admin/:id(\\d+)/messages/:messageId(\\d+)', requireAdmin, async (req, res) => {
   try {
     const r = await pool.query(`DELETE FROM chat_messages WHERE chat_id = $1 AND id = $2 AND sender = 'admin' RETURNING id`, [req.params.id, req.params.messageId]);
     if (!r.rowCount) return res.status(404).json({ error: 'Admin message not found.' });

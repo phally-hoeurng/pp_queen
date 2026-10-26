@@ -344,7 +344,6 @@ router.post('/admin/import', requireAdmin, importUpload.fields([{ name: 'file', 
       } finally { client.release(); }
     }
 
-    // Clean up any remaining unreferenced local files
     for (const f of uploadedImages) {
       if (f.path) { try { fs.unlinkSync(f.path); } catch (_) { } }
     }
@@ -403,7 +402,6 @@ router.post('/', requireAdmin, upload.array('images', 10), async (req, res) => {
       return res.status(400).json({ error: 'Please select a valid category.' });
     }
 
-    // Persist files to Supabase Storage before saving database records
     if (files.length > 0) {
       await persistUploadedFiles(files, 'products');
     }
@@ -460,7 +458,6 @@ router.put('/:id(\\d+)', requireAdmin, upload.array('images', 10), async (req, r
       return res.status(400).json({ error: 'A product can have at most 10 images.' });
     }
 
-    // Persist new files to Supabase Storage first
     if (files.length > 0) {
       await persistUploadedFiles(files, 'products');
     }

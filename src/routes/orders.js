@@ -14,7 +14,6 @@ const CUR = () => process.env.CURRENCY || '$';
 const money = (n) => CUR() + Number(n).toFixed(2);
 const clip = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
 
-// Base URL helper to construct links
 function getBaseUrl(req) {
   if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
   if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '');
@@ -60,8 +59,6 @@ function canAccess(order, req) {
   if (u && (u.role === 'admin' || (order.user_id && order.user_id === u.id))) return true;
   return sameToken(order.public_token, tokenFrom(req));
 }
-
-// ---------- Customer (no login needed) ----------
 
 // 1. Create order
 router.post(
@@ -120,7 +117,6 @@ router.post(
       }
       await client.query('COMMIT');
 
-      // Admin direct search link
       const adminOrderUrl = `${getBaseUrl(req)}/admin/index.html#orders?search=${encodeURIComponent(orderCode)}`;
       const productLines = lines.map((l) => ' . ' + esc(l.name) + '  ' + l.qty).join('\n');
 
@@ -146,7 +142,7 @@ router.post(
   }
 );
 
-// Orders of a logged-in account
+// Orders of logged in accounts
 router.get('/mine', requireAuth, async (req, res) => {
   const r = await pool.query(
     `SELECT o.id, o.order_code, o.total, o.status, o.created_at,
@@ -275,8 +271,6 @@ router.post(
 
         const orderCode = order.order_code || ('PP' + String(order.id).padStart(3, '0'));
         const adminOrderUrl = `${getBaseUrl(req)}/admin/index.html#orders?search=${encodeURIComponent(orderCode)}`;
-
-        // Formats products with dot and quantity
         const productLines = (order.items || []).map((i) => ' . ' + esc(i.name) + '  ' + (i.qty || 1)).join('\n');
 
         const telegramCaption =
@@ -291,20 +285,16 @@ router.post(
 
         const localPath = req.file.path;
 
-        // 1. Upload to Supabase Storage
         await persistUploadedFiles([req.file], 'payments');
         const proofRef = req.file.filename;
         const proofUrl = storedFileUrl(proofRef);
 
-        // 2. Update database record
         await pool.query("UPDATE orders SET payment_screenshot = $1, status = 'paid' WHERE id = $2", [proofRef, order.id]);
 
-        // 3. Clean up previous screenshot if replacing
         if (order.payment_screenshot) {
           await deleteStoredFile(order.payment_screenshot).catch(() => { });
         }
 
-        // 4. Send photo directly to Telegram with clickable link
         const telegramSent = await sendTelegramPhoto(proofUrl || localPath, telegramCaption);
 
         res.json({ ok: true, url: proofUrl, telegramSent });
