@@ -5,6 +5,11 @@ const path = require('path');
 const pool = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { upload, UPLOAD_DIR } = require('../upload');
+const {
+  storedFileUrl,
+  persistUploadedFiles,
+  deleteStoredFile
+} = require('../storage');
 
 const router = express.Router();
 const importUpload = multer({
@@ -20,12 +25,11 @@ const importUpload = multer({
   }),
   fileFilter: (req, file, cb) => {
     if (file.fieldname === 'file') return cb(null, /\.xlsx?$/i.test(file.originalname));
-    if (['image/jpeg','image/png','image/webp','image/gif'].includes(file.mimetype)) return cb(null, true);
+    if (['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)) return cb(null, true);
     cb(new Error('Only JPG, PNG, WEBP, or GIF product images are allowed.'));
   },
   limits: { fileSize: 5 * 1024 * 1024, files: 51 }
 });
-const LANGS = new Set(['en', 'km', 'zh']);
 
 function langOf(req) {
   const lang = String(req.query.lang || req.headers['accept-language'] || 'en').toLowerCase();
@@ -44,7 +48,9 @@ async function withImages(products) {
   const map = {};
   imgs.rows.forEach((i) => {
     (map[i.product_id] = map[i.product_id] || []).push({
-      id: i.id, url: '/uploads/' + i.filename, is_main: i.is_main
+      id: i.id,
+      url: storedFileUrl(i.filename),
+      is_main: i.is_main
     });
   });
   return products.map((p) => ({
@@ -71,9 +77,12 @@ function localizeProduct(p, lang) {
   };
 }
 
-function removeFile(filename) {
-  if (!filename) return;
-  fs.unlink(path.join(UPLOAD_DIR, path.basename(filename)), () => {});
+async function safeCleanupLocalFiles(files) {
+  for (const f of files || []) {
+    if (f.path) {
+      await fs.promises.unlink(f.path).catch(() => { });
+    }
+  }
 }
 
 function cleanText(v, max) {
@@ -90,7 +99,7 @@ function parsePrice(v) {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
 }
 
-// ---------- Public ----------
+// ---------- Public Routes ----------
 
 router.get('/', async (req, res) => {
   try {
@@ -108,7 +117,7 @@ router.get('/', async (req, res) => {
     }
     const order = sort === 'price_asc' ? 'p.price ASC'
       : sort === 'price_desc' ? 'p.price DESC'
-      : 'p.created_at DESC';
+        : 'p.created_at DESC';
     const r = await pool.query(
       `SELECT p.*, json_build_object('name_en',c.name_en,'name_km',c.name_km,'name_zh',c.name_zh) AS category_info
        FROM products p LEFT JOIN categories c ON c.name_en = p.category
@@ -173,7 +182,7 @@ router.get('/:id(\\d+)', async (req, res) => {
   }
 });
 
-// ---------- Admin ----------
+// ---------- Admin Routes ----------
 
 router.get('/admin/categories', requireAdmin, async (req, res) => {
   try {
@@ -230,7 +239,7 @@ router.put('/admin/categories/:id(\\d+)', requireAdmin, async (req, res) => {
     }
     await client.query(
       `UPDATE categories SET name_en=$1,name_km=$2,name_zh=$3,sort_order=$4,active=$5 WHERE id=$6`,
-      [name_en,name_km,name_zh,sort_order,active,req.params.id]
+      [name_en, name_km, name_zh, sort_order, active, req.params.id]
     );
     if (oldName !== name_en) {
       await client.query('UPDATE products SET category=$1 WHERE category=$2', [name_en, oldName]);
@@ -239,7 +248,7 @@ router.put('/admin/categories/:id(\\d+)', requireAdmin, async (req, res) => {
     const r = await pool.query('SELECT * FROM categories WHERE id=$1', [req.params.id]);
     res.json(r.rows[0]);
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     if (err.code === '23505') return res.status(409).json({ error: 'That category already exists.' });
     console.error(err);
     res.status(500).json({ error: 'Could not update category.' });
@@ -260,13 +269,9 @@ router.delete('/admin/categories/:id(\\d+)', requireAdmin, async (req, res) => {
   }
 });
 
-
 router.post('/admin/import', requireAdmin, importUpload.fields([{ name: 'file', maxCount: 1 }, { name: 'images', maxCount: 50 }]), async (req, res) => {
-  const saved = [];
   const uploadedImages = (req.files && req.files.images) || [];
   const workbookFile = (req.files && req.files.file && req.files.file[0]) || null;
-  if (workbookFile) saved.push(workbookFile.path);
-  uploadedImages.forEach(f => saved.push(f.path));
   const imageByName = new Map();
   for (const f of uploadedImages) imageByName.set(path.basename(f.originalname).toLowerCase(), f);
   let created = 0, skipped = 0, imagesAttached = 0;
@@ -288,42 +293,45 @@ router.post('/admin/import', requireAdmin, importUpload.fields([{ name: 'file', 
     };
     const normalizeCategory = value => {
       const c = String(value || '').trim().toLowerCase();
-      if (['bag','bags'].includes(c)) return 'Bags';
-      if (['shampoo','shampoos'].includes(c)) return 'Shampoo';
+      if (['bag', 'bags'].includes(c)) return 'Bags';
+      if (['shampoo', 'shampoos'].includes(c)) return 'Shampoo';
       return String(value || '').trim();
     };
+
     for (const row of rows) {
-      const name = keyOf(row, ['Product Name','Product name','name','Name']);
-      const category = normalizeCategory(keyOf(row, ['Category','category']));
-      const price = keyOf(row, ['Price','price','Selling Price']);
-      const stock = keyOf(row, ['Stock Quantity','Stock','stock','Quantity']);
-      const description = keyOf(row, ['Description','description','Product Description']);
-      const statusRaw = String(keyOf(row, ['Status','status','Active']) || 'Active').trim().toLowerCase();
-      const imageName = String(keyOf(row, ['Image Filename (optional)','Image Filename','Image Filename (Optional)','Image','Image Name','Filename']) || '').trim();
+      const name = keyOf(row, ['Product Name', 'Product name', 'name', 'Name']);
+      const category = normalizeCategory(keyOf(row, ['Category', 'category']));
+      const price = keyOf(row, ['Price', 'price', 'Selling Price']);
+      const stock = keyOf(row, ['Stock Quantity', 'Stock', 'stock', 'Quantity']);
+      const description = keyOf(row, ['Description', 'description', 'Product Description']);
+      const statusRaw = String(keyOf(row, ['Status', 'status', 'Active']) || 'Active').trim().toLowerCase();
+      const imageName = String(keyOf(row, ['Image Filename (optional)', 'Image Filename', 'Image Filename (Optional)', 'Image', 'Image Name', 'Filename']) || '').trim();
       const v = validateProduct({
         name, price, stock, category, description,
-        name_km: keyOf(row, ['Khmer name','Name Khmer','name_km']),
-        name_zh: keyOf(row, ['Chinese name','Name Chinese','name_zh']),
-        description_km: keyOf(row, ['Khmer description','description_km']),
-        description_zh: keyOf(row, ['Chinese description','description_zh']),
-        active: !['inactive','hidden','false','no','0','disabled'].includes(statusRaw)
+        name_km: keyOf(row, ['Khmer name', 'Name Khmer', 'name_km']),
+        name_zh: keyOf(row, ['Chinese name', 'Name Chinese', 'name_zh']),
+        description_km: keyOf(row, ['Khmer description', 'description_km']),
+        description_zh: keyOf(row, ['Chinese description', 'description_zh']),
+        active: !['inactive', 'hidden', 'false', 'no', '0', 'disabled'].includes(statusRaw)
       });
-      if (!v || !['Bags','Shampoo'].includes(v.category) || !(await verifyCategory(v.category))) { skipped++; continue; }
+      if (!v || !['Bags', 'Shampoo'].includes(v.category) || !(await verifyCategory(v.category))) { skipped++; continue; }
+
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
         const r = await client.query(
           `INSERT INTO products (name,name_km,name_zh,price,stock,category,description,description_km,description_zh,active,audience)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'') RETURNING id`,
-          [v.name,v.name_km,v.name_zh,v.price,v.stock,v.category,v.description,v.description_km,v.description_zh,v.active]
+          [v.name, v.name_km, v.name_zh, v.price, v.stock, v.category, v.description, v.description_km, v.description_zh, v.active]
         );
         const productId = r.rows[0].id;
         await client.query("UPDATE products SET product_code='PP' || LPAD(id::text, 2, '0') WHERE id=$1", [productId]);
         if (imageName) {
           const image = imageByName.get(path.basename(imageName).toLowerCase());
           if (image) {
-            const destName = image.filename;
-            await client.query('INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,TRUE,0)', [productId, destName]);
+            await persistUploadedFiles([image], 'products');
+            const destRef = image.filename;
+            await client.query('INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,TRUE,0)', [productId, destRef]);
             imageByName.delete(path.basename(image.originalname).toLowerCase());
             imagesAttached++;
           }
@@ -335,20 +343,18 @@ router.post('/admin/import', requireAdmin, importUpload.fields([{ name: 'file', 
         throw e;
       } finally { client.release(); }
     }
-    // Images not matched to a row are not needed; remove them to avoid orphaned uploads.
+
+    // Clean up any remaining unreferenced local files
     for (const f of uploadedImages) {
-      if (imageByName.get(path.basename(f.originalname).toLowerCase()) === f) {
-        try { fs.unlinkSync(f.path); } catch (_) {}
-      }
+      if (f.path) { try { fs.unlinkSync(f.path); } catch (_) { } }
     }
     res.json({ created, skipped, imagesAttached, imagesUploaded: uploadedImages.length, unmatchedImages: Math.max(0, uploadedImages.length - imagesAttached) });
   } catch (err) {
     console.error('Product import failed:', err);
-    res.status(400).json({ error: err.message && /Excel|workbook|image|file|worksheet/i.test(err.message) ? err.message : 'Could not import this workbook. Check the template columns, prices, stock quantities, and category names.' });
+    res.status(400).json({ error: err.message && /Excel|workbook|image|file|worksheet/i.test(err.message) ? err.message : 'Could not import this workbook.' });
   } finally {
-    for (const f of saved) {
-      if (f === workbookFile?.path) { try { fs.unlinkSync(f); } catch (_) {} }
-    }
+    if (workbookFile && workbookFile.path) { try { fs.unlinkSync(workbookFile.path); } catch (_) { } }
+    await safeCleanupLocalFiles(uploadedImages);
   }
 });
 
@@ -389,31 +395,41 @@ router.post('/', requireAdmin, upload.array('images', 10), async (req, res) => {
   try {
     const v = validateProduct(req.body);
     if (!v) {
-      files.forEach((f) => removeFile(f.filename));
+      await safeCleanupLocalFiles(files);
       return res.status(400).json({ error: 'Name, price and stock are required and must be valid.' });
     }
     if (!(await verifyCategory(v.category))) {
-      files.forEach((f) => removeFile(f.filename));
+      await safeCleanupLocalFiles(files);
       return res.status(400).json({ error: 'Please select a valid category.' });
     }
+
+    // Persist files to Supabase Storage before saving database records
+    if (files.length > 0) {
+      await persistUploadedFiles(files, 'products');
+    }
+
     const r = await pool.query(
       `INSERT INTO products (name,name_km,name_zh,price,stock,category,description,description_km,description_zh,active,audience)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [v.name,v.name_km,v.name_zh,v.price,v.stock,v.category,v.description,v.description_km,v.description_zh,v.active,v.audience]
+      [v.name, v.name_km, v.name_zh, v.price, v.stock, v.category, v.description, v.description_km, v.description_zh, v.active, v.audience]
     );
     let p = r.rows[0];
     p = (await pool.query("UPDATE products SET product_code='PP' || LPAD(id::text, 2, '0') WHERE id=$1 RETURNING *", [p.id])).rows[0];
+
     let mainIndex = parseInt(req.body.mainIndex, 10);
     if (!(mainIndex >= 0 && mainIndex < files.length)) mainIndex = 0;
-    for (let i=0;i<files.length;i++) {
-      await pool.query('INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,$3,$4)', [p.id,files[i].filename,i===mainIndex,i]);
+    for (let i = 0; i < files.length; i++) {
+      await pool.query(
+        'INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,$3,$4)',
+        [p.id, files[i].filename, i === mainIndex, i]
+      );
     }
     const [full] = await withImages([p]);
     res.status(201).json(full);
   } catch (err) {
-    files.forEach((f) => removeFile(f.filename));
+    await safeCleanupLocalFiles(files);
     console.error(err);
-    res.status(500).json({ error: 'Could not save product.' });
+    res.status(500).json({ error: err.message || 'Could not save product.' });
   }
 });
 
@@ -423,49 +439,59 @@ router.put('/:id(\\d+)', requireAdmin, upload.array('images', 10), async (req, r
     const id = req.params.id;
     const cur = await pool.query('SELECT * FROM products WHERE id=$1', [id]);
     if (!cur.rowCount) {
-      files.forEach((f) => removeFile(f.filename));
+      await safeCleanupLocalFiles(files);
       return res.status(404).json({ error: 'Product not found.' });
     }
     const v = validateProduct(req.body);
     if (!v) {
-      files.forEach((f) => removeFile(f.filename));
+      await safeCleanupLocalFiles(files);
       return res.status(400).json({ error: 'Name, price and stock are required and must be valid.' });
     }
     if (!(await verifyCategory(v.category))) {
-      files.forEach((f) => removeFile(f.filename));
+      await safeCleanupLocalFiles(files);
       return res.status(400).json({ error: 'Please select a valid category.' });
     }
     let toRemove = [];
-    try { toRemove = JSON.parse(req.body.removeImages || '[]').map(Number).filter(Number.isInteger); } catch (_) {}
+    try { toRemove = JSON.parse(req.body.removeImages || '[]').map(Number).filter(Number.isInteger); } catch (_) { }
     const existing = await pool.query('SELECT id,filename FROM product_images WHERE product_id=$1', [id]);
     const remaining = existing.rows.filter((x) => !toRemove.includes(x.id)).length + files.length;
     if (remaining > 10) {
-      files.forEach((f) => removeFile(f.filename));
+      await safeCleanupLocalFiles(files);
       return res.status(400).json({ error: 'A product can have at most 10 images.' });
+    }
+
+    // Persist new files to Supabase Storage first
+    if (files.length > 0) {
+      await persistUploadedFiles(files, 'products');
     }
 
     await pool.query(
       `UPDATE products SET name=$1,name_km=$2,name_zh=$3,price=$4,stock=$5,category=$6,description=$7,
        description_km=$8,description_zh=$9,active=$10,audience=$11 WHERE id=$12`,
-      [v.name,v.name_km,v.name_zh,v.price,v.stock,v.category,v.description,v.description_km,v.description_zh,v.active,v.audience,id]
+      [v.name, v.name_km, v.name_zh, v.price, v.stock, v.category, v.description, v.description_km, v.description_zh, v.active, v.audience, id]
     );
 
     if (toRemove.length) {
       const del = await pool.query(
         'DELETE FROM product_images WHERE product_id=$1 AND id=ANY($2) RETURNING filename',
-        [id,toRemove]
+        [id, toRemove]
       );
-      del.rows.forEach((d) => removeFile(d.filename));
+      for (const d of del.rows) {
+        await deleteStoredFile(d.filename).catch(() => { });
+      }
     }
-    for (const f of files) await pool.query(
-      'INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,FALSE,$3)',
-      [id,f.filename,existing.rows.length + files.indexOf(f)]
-    );
+    for (const f of files) {
+      await pool.query(
+        'INSERT INTO product_images (product_id,filename,is_main,sort_order) VALUES ($1,$2,FALSE,$3)',
+        [id, f.filename, existing.rows.length + files.indexOf(f)]
+      );
+    }
 
-    let layout = null; try { const l = JSON.parse(req.body.layout || 'null'); if (Array.isArray(l)) layout = l.map(String); } catch (_) {}
+    let layout = null;
+    try { const l = JSON.parse(req.body.layout || 'null'); if (Array.isArray(l)) layout = l.map(String); } catch (_) { }
     if (layout) {
       const rows = await pool.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC LIMIT $2', [id, files.length]);
-      const newIds = rows.rows.map((r) => r.id).reverse(); // same order as the uploaded files
+      const newIds = rows.rows.map((r) => r.id).reverse();
       const resolve = (key) => key.startsWith('old:') ? Number(key.slice(4)) : key.startsWith('new:') ? newIds[Number(key.slice(4))] : NaN;
       let pos = 0;
       for (const key of layout) {
@@ -475,41 +501,49 @@ router.put('/:id(\\d+)', requireAdmin, upload.array('images', 10), async (req, r
       const mainId = resolve(String(req.body.main || ''));
       if (Number.isInteger(mainId)) await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2', [mainId, id]);
     }
-    let imageOrder = []; if (!layout) try { imageOrder = JSON.parse(req.body.imageOrder || '[]').map(Number).filter(Number.isInteger); } catch (_) {}
-    for (let i=0;i<imageOrder.length;i++) await pool.query('UPDATE product_images SET sort_order=$1 WHERE id=$2 AND product_id=$3', [i,imageOrder[i],id]);
+    let imageOrder = [];
+    if (!layout) try { imageOrder = JSON.parse(req.body.imageOrder || '[]').map(Number).filter(Number.isInteger); } catch (_) { }
+    for (let i = 0; i < imageOrder.length; i++) {
+      await pool.query('UPDATE product_images SET sort_order=$1 WHERE id=$2 AND product_id=$3', [i, imageOrder[i], id]);
+    }
     const mainNewImageIndex = layout ? NaN : Number(req.body.mainNewImageIndex);
-    if (Number.isInteger(mainNewImageIndex) && mainNewImageIndex >= 0 && files[mainNewImageIndex]) { const newest = await pool.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC OFFSET $2 LIMIT 1', [id, files.length - 1 - mainNewImageIndex]); if (newest.rowCount) await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2',[newest.rows[0].id,id]); }
+    if (Number.isInteger(mainNewImageIndex) && mainNewImageIndex >= 0 && files[mainNewImageIndex]) {
+      const newest = await pool.query('SELECT id FROM product_images WHERE product_id=$1 ORDER BY id DESC OFFSET $2 LIMIT 1', [id, files.length - 1 - mainNewImageIndex]);
+      if (newest.rowCount) await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2', [newest.rows[0].id, id]);
+    }
     const mainImageId = layout ? 0 : Number(req.body.mainImageId);
     if (Number.isInteger(mainImageId) && mainImageId > 0) {
-      await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2',[mainImageId,id]);
+      await pool.query('UPDATE product_images SET is_main=(id=$1) WHERE product_id=$2', [mainImageId, id]);
     }
-    const main = await pool.query('SELECT id FROM product_images WHERE product_id=$1 AND is_main=TRUE',[id]);
+    const main = await pool.query('SELECT id FROM product_images WHERE product_id=$1 AND is_main=TRUE', [id]);
     if (!main.rowCount) {
       await pool.query(
         'UPDATE product_images SET is_main=TRUE WHERE id=(SELECT id FROM product_images WHERE product_id=$1 ORDER BY id LIMIT 1)',
         [id]
       );
     }
-    const r = await pool.query('SELECT * FROM products WHERE id=$1',[id]);
+    const r = await pool.query('SELECT * FROM products WHERE id=$1', [id]);
     const [full] = await withImages(r.rows);
     res.json(full);
   } catch (err) {
-    files.forEach((f) => removeFile(f.filename));
+    await safeCleanupLocalFiles(files);
     console.error(err);
-    res.status(500).json({ error: 'Could not update product.' });
+    res.status(500).json({ error: err.message || 'Could not update product.' });
   }
 });
 
-router.delete('/:id(\\d+)', requireAdmin, async (req,res) => {
+router.delete('/:id(\\d+)', requireAdmin, async (req, res) => {
   try {
-    const imgs = await pool.query('SELECT filename FROM product_images WHERE product_id=$1',[req.params.id]);
-    const r = await pool.query('DELETE FROM products WHERE id=$1',[req.params.id]);
-    if (!r.rowCount) return res.status(404).json({ error:'Product not found.' });
-    imgs.rows.forEach((i)=>removeFile(i.filename));
-    res.json({ok:true});
-  } catch(err) {
+    const imgs = await pool.query('SELECT filename FROM product_images WHERE product_id=$1', [req.params.id]);
+    const r = await pool.query('DELETE FROM products WHERE id=$1', [req.params.id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Product not found.' });
+    for (const i of imgs.rows) {
+      await deleteStoredFile(i.filename).catch(() => { });
+    }
+    res.json({ ok: true });
+  } catch (err) {
     console.error(err);
-    res.status(500).json({error:'Could not delete product.'});
+    res.status(500).json({ error: 'Could not delete product.' });
   }
 });
 

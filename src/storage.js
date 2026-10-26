@@ -7,7 +7,7 @@ const REF_PREFIX = 'sb:';
 
 function config() {
   const base = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || '';
   if (!base || !key) {
     const err = new Error('Permanent image storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server, then create the public Storage bucket "' + BUCKET + '".');
     err.code = 'SUPABASE_STORAGE_NOT_CONFIGURED';
@@ -15,7 +15,6 @@ function config() {
   }
   return { base, key };
 }
-
 function isSupabaseRef(value) {
   return typeof value === 'string' && value.startsWith(REF_PREFIX);
 }
@@ -59,8 +58,13 @@ async function uploadLocalFile(file, folder = 'products') {
 function storedFileUrl(value) {
   if (!value) return null;
   const ref = parseRef(value);
-  if (!ref) return '/uploads/' + encodeURIComponent(path.basename(String(value)));
-  const { base } = config();
+  if (!ref) {
+    return '/uploads/' + encodeURIComponent(path.basename(String(value)));
+  }
+  const base = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+  if (!base) {
+    return null;
+  }
   return `${base}/storage/v1/object/public/${encodeURIComponent(ref.bucket)}/${encodePath(ref.objectPath)}`;
 }
 
@@ -90,13 +94,13 @@ async function persistUploadedFiles(files, folder = 'products') {
       const ref = await uploadLocalFile(file, folder);
       file.filename = ref;
       completed.push(ref);
-      await fs.promises.unlink(oldPath).catch(() => {});
+      await fs.promises.unlink(oldPath).catch(() => { });
       file.path = null;
     }
     return completed;
   } catch (err) {
-    await Promise.all(completed.map((ref) => deleteStoredFile(ref).catch(() => {})));
-    for (const file of files || []) if (file.path) await fs.promises.unlink(file.path).catch(() => {});
+    await Promise.all(completed.map((ref) => deleteStoredFile(ref).catch(() => { })));
+    for (const file of files || []) if (file.path) await fs.promises.unlink(file.path).catch(() => { });
     throw err;
   }
 }
