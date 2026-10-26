@@ -28,11 +28,34 @@
 
     const params = new URLSearchParams(location.search);
     const id = params.get('id');
-    const token = params.get('t') || PP.orderToken(id);   // the secret link of this order (no login needed)
+    const token = params.get('t') || PP.orderToken(id);   // secret link of this order (no login needed)
     const authHeaders = () => (token ? { 'X-Order-Token': token } : {});
     let poll, lastSig = '';
     const PAYMENT_PAGE_SIZE = 20;
     let paymentItemsPage = 1;
+
+    function resolveImgUrl(src) {
+      if (!src) return '';
+      const s = String(src).trim();
+      if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/')) return s;
+      return '/uploads/' + encodeURIComponent(s);
+    }
+
+    function renderOrderItemCard(i) {
+      const img = resolveImgUrl(i.product_image || i.image);
+      const imgTag = img
+        ? '<img src="' + PP.esc(img) + '" alt="' + PP.esc(i.name || '') + '" onerror="this.onerror=null;this.replaceWith(Object.assign(document.createElement(\'div\'),{className:\'item-img-placeholder\',textContent:\'PP\'}))">'
+        : '<div class="item-img-placeholder">PP</div>';
+      return '<div class="oi-row oi-lg">' +
+        imgTag +
+        '<div class="oi-meta">' +
+        '<div class="oi-name">' + PP.esc(i.name || '') + '</div>' +
+        '<div class="oi-sub"><span class="oi-code">' + (i.product_code ? 'Product ID: ' + PP.esc(i.product_code) : '') + '</span> <span class="oi-qty">Qty: ' + (i.qty || 1) + '</span></div>' +
+        '</div>' +
+        '<div class="oi-price">' + PP.money(i.price * (i.qty || 1)) + '</div>' +
+        '</div>';
+    }
+
     function paymentPagerMarkup(total, page) {
       const pages = Math.ceil(total / PAYMENT_PAGE_SIZE);
       if (pages <= 1) return '';
@@ -43,6 +66,7 @@
       if (end < pages) html += '<span class="page-ellipsis">…</span><button type="button" class="page-btn" data-page="' + pages + '">' + pages + '</button>';
       return html + '<span class="page-count">Page ' + page + ' of ' + pages + '</span><button type="button" class="page-btn" data-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + '>Next</button>';
     }
+
     function renderPaymentItems(items, page) {
       const safeItems = Array.isArray(items) ? items : [];
       const pages = Math.max(1, Math.ceil(safeItems.length / PAYMENT_PAGE_SIZE));
@@ -50,7 +74,10 @@
       const list = document.getElementById('payment-order-items-list');
       const pager = document.getElementById('payment-order-items-pagination');
       if (!list || !pager) return;
-      list.innerHTML = safeItems.slice((paymentItemsPage - 1) * PAYMENT_PAGE_SIZE, paymentItemsPage * PAYMENT_PAGE_SIZE).map((i) => PP.orderItemHtml(i, { price: true, cls: 'oi-lg' })).join('');
+      list.innerHTML = safeItems
+        .slice((paymentItemsPage - 1) * PAYMENT_PAGE_SIZE, paymentItemsPage * PAYMENT_PAGE_SIZE)
+        .map((i) => (typeof PP.orderItemHtml === 'function' ? PP.orderItemHtml(i, { price: true, cls: 'oi-lg' }) : renderOrderItemCard(i)))
+        .join('');
       pager.innerHTML = paymentPagerMarkup(safeItems.length, paymentItemsPage);
       pager.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => renderPaymentItems(safeItems, Number(b.dataset.page)));
     }
@@ -59,6 +86,7 @@
 
     function renderPending(view, o) {
       const sent = !!o.payment_screenshot_url;
+      const proofUrl = resolveImgUrl(o.payment_screenshot_url);
       view.innerHTML = '<div class="two-col"><div class="panel qr-box"><h2>Scan to pay</h2>' +
         '<div class="big-amount">' + PP.money(o.total) + '</div><p class="muted">Order ID: <b>' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</b>. Pay this exact amount.</p>' +
         '<img id="qr" src="/images/payment-qr.png" alt="Payment QR code">' +
@@ -66,7 +94,7 @@
         '<p>Status: <span class="badge warn">Waiting for payment</span></p><p class="muted">This page updates by itself when the shop confirms your payment.</p></div>' +
         '<div class="panel pink"><h3>Already paid?</h3><p>Upload proof of payment so the shop can verify it.</p>' +
         '<div id="msg"></div>' +
-        (sent ? '<div class="sent-box"><span class="tick">✓</span><div><b>Payment proof received</b><br><span class="muted">The shop has been alerted and will verify your payment soon.</span></div></div>' + (/\.pdf(?:$|[?#])/i.test(o.payment_screenshot_url) ? '<p><a class="btn ghost" href="' + PP.esc(o.payment_screenshot_url) + '" target="_blank" rel="noopener">View uploaded PDF</a></p>' : '<img class="shot" id="shot-img" src="' + PP.esc(o.payment_screenshot_url) + '" alt="Your payment proof">') : '') +
+        (sent ? '<div class="sent-box"><span class="tick">✓</span><div><b>Payment proof received</b><br><span class="muted">The shop has been alerted and will verify your payment soon.</span></div></div>' + (/\.pdf(?:$|[?#])/i.test(proofUrl) ? '<p><a class="btn ghost" href="' + PP.esc(proofUrl) + '" target="_blank" rel="noopener">View uploaded PDF</a></p>' : '<img class="shot" id="shot-img" src="' + PP.esc(proofUrl) + '" alt="Your payment proof">') : '') +
         '<label class="drop" id="drop" for="shot">' +
         '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>' +
         '<b>' + (sent ? 'Replace payment proof' : 'Upload your payment proof') + '</b><small>Upload proof of payment (JPG, PNG, WebP or PDF; max 8 MB)</small>' +
@@ -80,13 +108,12 @@
       const qr = document.getElementById('qr');
       qr.onerror = () => { qr.classList.add('hidden'); document.getElementById('qr-missing').classList.remove('hidden'); };
 
-      // choose a file -> preview -> shrink -> send. The shop's Telegram bot gets the picture straight away.
       const input = document.getElementById('shot');
       input.onchange = async () => {
         const f0 = input.files[0], msg = document.getElementById('msg'), prev = document.getElementById('preview'), drop = document.getElementById('drop');
         msg.innerHTML = '';
         if (!f0) return;
-        if (!( /^image\/(jpeg|png|webp)$/.test(f0.type) || f0.type === 'application/pdf' || /\.pdf$/i.test(f0.name))) { msg.innerHTML = '<div class="alert error">Choose JPG, JPEG, PNG, WebP or PDF only.</div>'; input.value = ''; return; }
+        if (!(/^image\/(jpeg|png|webp)$/.test(f0.type) || f0.type === 'application/pdf' || /\.pdf$/i.test(f0.name))) { msg.innerHTML = '<div class="alert error">Choose JPG, JPEG, PNG, WebP or PDF only.</div>'; input.value = ''; return; }
         if (f0.size > 8 * 1024 * 1024) { msg.innerHTML = '<div class="alert error">File must be 8 MB or smaller.</div>'; input.value = ''; return; }
         prev.innerHTML = (f0.type === 'application/pdf' || /\.pdf$/i.test(f0.name) ? '<p>PDF selected: ' + PP.esc(f0.name) + '</p>' : '<img class="shot" src="' + URL.createObjectURL(f0) + '" alt="">') + '<div class="progress"><i></i></div><p class="muted">Uploading payment proof...</p>';
         drop.classList.add('busy'); input.disabled = true;
@@ -95,7 +122,7 @@
           const fd = new FormData(); fd.append('screenshot', f);
           const result = await PP.api('/orders/' + o.id + '/screenshot', { method: 'POST', body: fd, headers: authHeaders() });
           PP.toast(result.telegramSent === false ? 'Payment proof saved — shop alert is temporarily unavailable' : 'Payment proof sent to the shop');
-          lastSig = ''; await load();            // redraw: shows the "sent" box
+          lastSig = ''; await load();
         } catch (e) {
           prev.innerHTML = '';
           msg.innerHTML = '<div class="alert error">' + PP.esc(e.message) + '</div>';
@@ -104,7 +131,7 @@
       };
     }
 
-    const STATUS_STEPS = ['waiting_pay','paid','success'];
+    const STATUS_STEPS = ['waiting_pay', 'paid', 'success'];
     const STATUS_LABELS = { waiting_pay: 'Waiting Payment', paid: 'Paid', success: 'Confirmed' };
     function statusTrack(current) {
       const at = STATUS_STEPS.indexOf(current);
@@ -112,14 +139,14 @@
     }
     function renderDone(view, o) {
       const items = Array.isArray(o.items) ? o.items : [];
+      const proofUrl = resolveImgUrl(o.payment_screenshot_url);
       view.innerHTML = '<section class="panel order-status-page"><div class="order-status-heading"><div><h2>Order status</h2><p>Order <b>' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</b> • ' + PP.money(o.total) + '</p></div><span class="badge ' + (o.status === 'success' ? 'ok' : o.status === 'paid' ? 'dark' : 'warn') + '">' + PP.esc(STATUS_LABELS[o.status] || o.status) + '</span></div>' + statusTrack(o.status) +
-        (o.payment_screenshot_url ? '<section class="payment-proof-status"><h3>Payment Proof</h3>' + (/\.pdf(?:$|[?#])/i.test(o.payment_screenshot_url) ? '<a href="' + PP.esc(o.payment_screenshot_url) + '" target="_blank" rel="noopener">View uploaded PDF</a>' : '<img class="payment-proof-preview" src="' + PP.esc(o.payment_screenshot_url) + '" alt="Payment proof submitted for this order">') + '<p class="muted">Payment proof has been submitted. The shop will confirm your order soon.</p></section>' : '') +
+        (o.payment_screenshot_url ? '<section class="payment-proof-status"><h3>Payment Proof</h3>' + (/\.pdf(?:$|[?#])/i.test(proofUrl) ? '<a href="' + PP.esc(proofUrl) + '" target="_blank" rel="noopener">View uploaded PDF</a>' : '<img class="payment-proof-preview" src="' + PP.esc(proofUrl) + '" alt="Payment proof submitted for this order">') + '<p class="muted">Payment proof has been submitted. The shop will confirm your order soon.</p></section>' : '') +
         '<h3 class="order-status-items-title">Products in this order \u00b7 ' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</h3><div id="payment-order-items-list" class="payment-order-items"></div><nav id="payment-order-items-pagination" class="pagination" aria-label="Ordered product pages"></nav>' +
         '<div class="order-status-actions"><a class="btn" href="/">PP Queen Shop</a> <a class="btn ghost" href="/orders.html">My orders</a></div></section>';
       renderPaymentItems(items, 1);
     }
 
-    // Draws the page only when something really changed, so a chosen file is never wiped by the 8-second refresh
     async function load() {
       const view = document.getElementById('view');
       try {

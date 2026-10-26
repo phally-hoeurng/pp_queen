@@ -4,9 +4,10 @@ const fs = require('fs');
 const path = require('path');
 const pool = require('../db');
 const { requireAuth, optionalAuth, requireAdmin } = require('../middleware/auth');
-const { upload, paymentProofUpload, UPLOAD_DIR } = require('../upload');
+const { paymentProofUpload, UPLOAD_DIR } = require('../upload');
 const { sendTelegram, sendTelegramPhoto, esc } = require('../telegram');
 const { rateLimit } = require('../ratelimit');
+const { storedFileUrl, persistUploadedFiles, deleteStoredFile } = require('../storage');
 
 const router = express.Router();
 const CUR = () => process.env.CURRENCY || '$';
@@ -23,12 +24,16 @@ async function loadOrder(id, lang = 'en') {
        SELECT filename FROM product_images WHERE product_id = oi.product_id
        ORDER BY is_main DESC, id LIMIT 1
      ) pi ON TRUE
-     WHERE oi.order_id = $1 ORDER BY oi.id`, [id, ['km','zh'].includes(lang) ? lang : 'en']
+     WHERE oi.order_id = $1 ORDER BY oi.id`, [id, ['km', 'zh'].includes(lang) ? lang : 'en']
   );
   const order = o.rows[0];
   order.total = Number(order.total);
-  order.items = items.rows.map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? '/uploads/' + i.product_image : null }));
-  order.payment_screenshot_url = order.payment_screenshot ? '/uploads/' + order.payment_screenshot : null;
+  order.items = items.rows.map((i) => ({
+    ...i,
+    price: Number(i.price),
+    product_image: storedFileUrl(i.product_image)
+  }));
+  order.payment_screenshot_url = storedFileUrl(order.payment_screenshot);
   return order;
 }
 
@@ -90,17 +95,12 @@ router.post(
       }
       const token = crypto.randomBytes(16).toString('hex');
 
-      // order_code is NOT NULL in the production database, so it must be
-      // supplied in the INSERT itself. We reserve the PostgreSQL order id
-      // first, then use that same id to create the customer-facing code.
-      // This also keeps codes stable (PP001, PP002, ...) and avoids a
-      // temporary NULL value that would violate the database constraint.
       const nextId = await client.query(
         "SELECT nextval(pg_get_serial_sequence('orders', 'id')) AS id"
       );
       const orderId = Number(nextId.rows[0].id);
       const orderCode = 'PP' + String(orderId).padStart(3, '0');
-      const o = await client.query(
+      await client.query(
         `INSERT INTO orders (id, order_code, user_id, customer_name, phone, address, note, total, status, public_token)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'waiting_pay',$9) RETURNING id, order_code`,
         [orderId, orderCode, req.user ? req.user.id : null, customer_name, phone, address, note, total, token]
@@ -121,7 +121,7 @@ router.post(
       );
       res.status(201).json({ id: orderId, order_code: orderCode, total, status: 'waiting_pay', token });
     } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
+      await client.query('ROLLBACK').catch(() => { });
       res.status(400).json({ error: err.message || 'Could not create order.' });
     } finally {
       client.release();
@@ -140,9 +140,18 @@ router.get('/mine', requireAuth, async (req, res) => {
             (SELECT COALESCE(json_agg(json_build_object('product_id',oi.product_id,'product_code',p.product_code,'name',COALESCE(NULLIF(CASE WHEN $2='km' THEN p.name_km WHEN $2='zh' THEN p.name_zh ELSE p.name END,''),oi.name),'qty',oi.qty,'price',oi.price,'product_image',im.filename) ORDER BY oi.id), '[]'::json)
              FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN LATERAL (SELECT filename FROM product_images WHERE product_id = oi.product_id ORDER BY is_main DESC, id LIMIT 1) im ON TRUE
              WHERE oi.order_id = o.id) AS items
-     FROM orders o WHERE o.user_id = $1 ORDER BY o.created_at DESC`, [req.user.id, ['km','zh'].includes(req.query.lang) ? req.query.lang : 'en']
+     FROM orders o WHERE o.user_id = $1 ORDER BY o.created_at DESC`, [req.user.id, ['km', 'zh'].includes(req.query.lang) ? req.query.lang : 'en']
   );
-  res.json(r.rows.map((o) => ({ ...o, total: Number(o.total), product_image: o.product_image ? '/uploads/' + o.product_image : null, items: (o.items || []).map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? '/uploads/' + i.product_image : null })) })));
+  res.json(r.rows.map((o) => ({
+    ...o,
+    total: Number(o.total),
+    product_image: storedFileUrl(o.product_image),
+    items: (o.items || []).map((i) => ({
+      ...i,
+      price: Number(i.price),
+      product_image: storedFileUrl(i.product_image)
+    }))
+  })));
 });
 
 // "My orders" for guests: the browser sends the orders it remembers
@@ -166,12 +175,26 @@ router.post(
                  FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id LEFT JOIN LATERAL (SELECT filename FROM product_images WHERE product_id = oi.product_id ORDER BY is_main DESC, id LIMIT 1) im ON TRUE
                  WHERE oi.order_id = o.id) AS items
          FROM orders o WHERE o.id = ANY($1::int[]) ORDER BY o.id DESC`,
-        [[...tokens.keys()], ['km','zh'].includes(req.query.lang) ? req.query.lang : 'en']
+        [[...tokens.keys()], ['km', 'zh'].includes(req.query.lang) ? req.query.lang : 'en']
       );
       res.json(
         r.rows
           .filter((o) => sameToken(o.public_token, tokens.get(o.id)))
-          .map((o) => ({ id: o.id, order_code: o.order_code, total: Number(o.total), status: o.status, created_at: o.created_at, product_name: o.product_name, product_image: o.product_image ? '/uploads/' + o.product_image : null, item_count: o.item_count, items: (o.items || []).map((i) => ({ ...i, price: Number(i.price), product_image: i.product_image ? '/uploads/' + i.product_image : null })) }))
+          .map((o) => ({
+            id: o.id,
+            order_code: o.order_code,
+            total: Number(o.total),
+            status: o.status,
+            created_at: o.created_at,
+            product_name: o.product_name,
+            product_image: storedFileUrl(o.product_image),
+            item_count: o.item_count,
+            items: (o.items || []).map((i) => ({
+              ...i,
+              price: Number(i.price),
+              product_image: storedFileUrl(i.product_image)
+            }))
+          }))
       );
     } catch (err) {
       console.error(err);
@@ -207,8 +230,7 @@ async function guardOrder(req, res, next) {
   }
 }
 
-// Customer uploads the payment screenshot. The picture is sent to the
-// shop's Telegram bot straight away.
+// Customer uploads the payment screenshot.
 router.post(
   '/:id(\\d+)/screenshot',
   optionalAuth,
@@ -222,36 +244,45 @@ router.post(
         const ext = path.extname(req.file.filename).toLowerCase();
         const valid = ext === '.pdf' ? b.subarray(0, 5).toString() === '%PDF-'
           : ext === '.jpg' ? b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff
-          : ext === '.png' ? b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
-          : ext === '.webp' ? b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP'
-          : false;
-        if (!valid) { await fs.promises.unlink(req.file.path).catch(() => {}); return res.status(400).json({ error: 'The uploaded file content does not match an allowed image or PDF format.' }); }
+            : ext === '.png' ? b.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+              : ext === '.webp' ? b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP'
+                : false;
+        if (!valid) {
+          await fs.promises.unlink(req.file.path).catch(() => { });
+          return res.status(400).json({ error: 'The uploaded file content does not match an allowed image or PDF format.' });
+        }
       } catch (e) { return next(e); }
     }
     return (async () => {
-    try {
-      const order = req.order;
-      if (!req.file) return res.status(400).json({ error: 'Choose a JPG, PNG, WebP image or PDF payment proof.' });
-      await pool.query("UPDATE orders SET payment_screenshot = $1, status = 'paid' WHERE id = $2", [req.file.filename, order.id]);
+      try {
+        const order = req.order;
+        if (!req.file) return res.status(400).json({ error: 'Choose a JPG, PNG, WebP image or PDF payment proof.' });
 
-      // remove the previous screenshot file if the customer sent a new one
-      const again = !!order.payment_screenshot;
-      if (again) fs.unlink(path.join(UPLOAD_DIR, path.basename(order.payment_screenshot)), () => {});
+        // Persist payment proof to Supabase Storage before DB update
+        const tempPath = req.file.path;
+        await persistUploadedFiles([req.file], 'payments');
+        const proofRef = req.file.filename;
 
-      // Wait for Telegram so the UI can accurately report whether the shop was alerted.
-      // The upload itself remains successful even if Telegram is temporarily unavailable.
-      const telegramSent = await sendTelegramPhoto(
-        req.file.path,
-        '📸 <b>Payment proof' + (again ? ' (new one)' : '') + '</b>\n' +
-        'Order ' + (order.order_code || ('PP' + String(order.id).padStart(3, '0'))) + '  •  <b>' + money(order.total) + '</b>\n' +
-        'Customer: ' + esc(order.customer_name) + '\nPhone: ' + esc(order.phone) + '\n' +
-        'Please check it and press “Confirm order” in Admin > Waiting Confirm.'
-      );
-      res.json({ ok: true, url: '/uploads/' + req.file.filename, telegramSent });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'Could not upload payment proof.' });
-    }
+        await pool.query("UPDATE orders SET payment_screenshot = $1, status = 'paid' WHERE id = $2", [proofRef, order.id]);
+
+        // Clean up previous screenshot if customer uploaded a replacement
+        if (order.payment_screenshot) {
+          await deleteStoredFile(order.payment_screenshot).catch(() => { });
+        }
+
+        const telegramSent = await sendTelegramPhoto(
+          tempPath,
+          '📸 <b>Payment proof' + (order.payment_screenshot ? ' (new one)' : '') + '</b>\n' +
+          'Order ' + (order.order_code || ('PP' + String(order.id).padStart(3, '0'))) + '  •  <b>' + money(order.total) + '</b>\n' +
+          'Customer: ' + esc(order.customer_name) + '\nPhone: ' + esc(order.phone) + '\n' +
+          'Please check it and press “Confirm order” in Admin > Waiting Confirm.'
+        );
+        res.json({ ok: true, url: storedFileUrl(proofRef), telegramSent });
+      } catch (err) {
+        if (req.file && req.file.path) await fs.promises.unlink(req.file.path).catch(() => { });
+        console.error(err);
+        res.status(500).json({ error: 'Could not upload payment proof.' });
+      }
     })();
   }
 );
@@ -263,17 +294,18 @@ router.get('/admin/all', requireAdmin, async (req, res) => {
   const r = status
     ? await pool.query('SELECT * FROM orders WHERE status = $1 ORDER BY created_at DESC', [status])
     : await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-  res.json(r.rows.map((o) => ({ ...o, total: Number(o.total) })));
+  res.json(r.rows.map((o) => ({
+    ...o,
+    total: Number(o.total),
+    payment_screenshot_url: storedFileUrl(o.payment_screenshot)
+  })));
 });
 
-// Delete an order as an admin. Restore reserved stock for orders that were
-// not confirmed yet; confirmed sales remain deducted. Related order_items
-// are removed by the database's ON DELETE CASCADE constraint.
 router.delete('/admin/:id(\\d+)', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const found = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [req.params.id]);
+    const found = await client.query('SELECT id, status, payment_screenshot FROM orders WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!found.rowCount) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Order not found.' });
@@ -289,9 +321,12 @@ router.delete('/admin/:id(\\d+)', requireAdmin, async (req, res) => {
     }
     await client.query('DELETE FROM orders WHERE id = $1', [order.id]);
     await client.query('COMMIT');
+    if (order.payment_screenshot) {
+      await deleteStoredFile(order.payment_screenshot).catch(() => { });
+    }
     res.json({ ok: true, id: Number(order.id) });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Order delete failed:', err);
     res.status(500).json({ error: 'Could not delete order.' });
   } finally {
@@ -316,12 +351,11 @@ router.get('/admin/stats', requireAdmin, async (req, res) => {
     todaySales: Number(today.rows[0].sales),
     pendingOrders: pending.rows[0].n,
     paidOrders: paid.rows[0].n,
-    lowStock: low.rows,
+    lowStock: low.rows.map((r) => ({ ...r, image: storedFileUrl(r.image) })),
     last7: days.rows.map((d) => ({ day: d.day, sales: Number(d.sales) }))
   });
 });
 
-// Admin order workflow: waiting_pay -> paid (customer screenshot), paid -> success (admin confirmation). Confirmed is final.
 router.patch('/admin/:id(\\d+)/status', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
@@ -342,7 +376,7 @@ router.patch('/admin/:id(\\d+)/status', requireAdmin, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Invalid order status transition: ' + o.status + ' → ' + status + '.' });
     }
-        await client.query('UPDATE orders SET status = $1 WHERE id = $2', [status, o.id]);
+    await client.query('UPDATE orders SET status = $1 WHERE id = $2', [status, o.id]);
     await client.query('COMMIT');
     const code = o.order_code || ('PP' + String(o.id).padStart(3, '0'));
     const label = { success: '🟢 CONFIRMED' }[status];
@@ -355,7 +389,7 @@ router.patch('/admin/:id(\\d+)/status', requireAdmin, async (req, res) => {
     }
     res.json(await loadOrder(o.id, req.query.lang || 'en'));
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error(err);
     res.status(500).json({ error: 'Could not change status.' });
   } finally { client.release(); }

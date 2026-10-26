@@ -17,10 +17,13 @@
   <header id="site-header"></header>
   <main class="container">
     <div class="order-hero my-orders-hero">
-      <div class="my-orders-hero-copy"><span class="my-orders-hero-icon" aria-hidden="true">▤</span><div>
-        <h1>My Orders</h1>
-        <p class="muted">View your order, pay any order that is waiting for payment, and follow its status — no customer login needed.</p>
-      </div></div><a class="btn ghost" href="/">Continue shopping</a>
+      <div class="my-orders-hero-copy"><span class="my-orders-hero-icon" aria-hidden="true">▤</span>
+        <div>
+          <h1>My Orders</h1>
+          <p class="muted">View your order, pay any order that is waiting for payment, and follow its status — no
+            customer login needed.</p>
+        </div>
+      </div><a class="btn ghost" href="/">Continue shopping</a>
     </div>
     <div id="view">
       <p class="muted">Loading...</p>
@@ -34,7 +37,7 @@
     const STATUS_ORDER = ['waiting_pay', 'paid', 'success'];
     const statusName = s => STATUS[s] || 'Status unavailable';
     const safeStatus = s => STATUS_ORDER.includes(s) ? s : 'unknown';
-    const icon = name => ({ search:'⌕', calendar:'▦', bag:'♧', eye:'◎', clock:'◷', check:'✓', box:'◇' }[name] || '•');
+    const icon = name => ({ search: '⌕', calendar: '▦', bag: '♧', eye: '◎', clock: '◷', check: '✓', box: '◇' }[name] || '•');
     function statusTrack(status) {
       const current = safeStatus(status), index = STATUS_ORDER.indexOf(current);
       return '<div class="order-progress" aria-label="Order status: ' + PP.esc(statusName(status)) + '">' + STATUS_ORDER.map((step, i) => {
@@ -52,8 +55,8 @@
         const local = PP.myOrders();
         if (local.length) {
           try {
-            const found = await PP.api('/orders/lookup?lang=' + encodeURIComponent(PP.lang), { method: 'POST', body: { orders: local.map(o => ({ id:o.id, token:o.token })) } });
-            found.forEach(o => PP.saveOrder({ id:o.id, status:o.status, total:o.total }));
+            const found = await PP.api('/orders/lookup?lang=' + encodeURIComponent(PP.lang), { method: 'POST', body: { orders: local.map(o => ({ id: o.id, token: o.token })) } });
+            found.forEach(o => PP.saveOrder({ id: o.id, status: o.status, total: o.total }));
             rows = found.map(o => Object.assign({}, o, { token: PP.orderToken(o.id) }));
           } catch (e) { rows = local.slice(); }
         }
@@ -67,58 +70,67 @@
         view.innerHTML = '<div class="empty"><p>We could not load your orders right now. Please try again.</p><button class="btn" id="retry-orders" type="button">Try again</button></div>';
         view.querySelector('#retry-orders').onclick = () => location.reload(); return;
       }
-      rows.sort((a,b) => new Date(b.created_at || 0) - new Date(a.created_at || 0) || Number(b.id)-Number(a.id));
+      rows.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0) || Number(b.id) - Number(a.id));
       if (!rows.length) { view.innerHTML = '<div class="empty"><p>You have no orders yet.</p><a class="btn" href="/">Start shopping</a></div>'; return; }
       const PAGE_SIZE = 10; let currentPage = 1, searchOrderId = '', statusFilter = '', dateFilter = '';
-      const dateOnly = d => { if (!d) return ''; const x = new Date(d); return isNaN(x) ? '' : x.toISOString().slice(0,10); };
+      const dateOnly = d => { if (!d) return ''; const x = new Date(d); return isNaN(x) ? '' : x.toISOString().slice(0, 10); };
+
+      const resolveImgUrl = (src) => {
+        if (!src) return '';
+        const s = String(src).trim();
+        if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/')) return s;
+        return '/uploads/' + encodeURIComponent(s);
+      };
+
       const itemHtml = (item) => {
         const qty = Math.max(1, Number(item.qty || 1)), price = Number(item.price || 0);
-        const image = item.product_image ? '<img loading="lazy" src="' + PP.esc(item.product_image) + '" alt="' + PP.esc(item.name || 'Product') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'">' : '';
-        return '<div class="order-product"><div class="order-product-image">' + image + '<span class="order-image-fallback" ' + (item.product_image ? 'style="display:none"' : '') + '>PP</span></div><div class="order-product-name" title="' + PP.esc(item.name || 'Product') + '">' + PP.esc(item.name || 'Product') + '</div><div class="order-product-price">' + PP.money(price) + '</div><div class="order-product-qty">Qty: ' + qty + '</div></div>';
+        const resolvedUrl = resolveImgUrl(item.product_image);
+        const image = resolvedUrl ? '<img loading="lazy" src="' + PP.esc(resolvedUrl) + '" alt="' + PP.esc(item.name || 'Product') + '" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'">' : '';
+        return '<div class="order-product"><div class="order-product-image">' + image + '<span class="order-image-fallback" ' + (resolvedUrl ? 'style="display:none"' : '') + '>PP</span></div><div class="order-product-name" title="' + PP.esc(item.name || 'Product') + '">' + PP.esc(item.name || 'Product') + '</div><div class="order-product-price">' + PP.money(price) + '</div><div class="order-product-qty">Qty: ' + qty + '</div></div>';
       };
       function pager(total, page) {
-        const pages = Math.ceil(total/PAGE_SIZE); if (pages <= 1) return '';
-        let h = '<nav class="pagination" aria-label="Order pages"><button class="page-btn" data-page="' + (page-1) + '"' + (page===1?' disabled':'') + ' aria-label="Previous page">‹</button>';
-        const a=Math.max(1,page-2), b=Math.min(pages,page+2); if(a>1) h += '<button class="page-btn" data-page="1">1</button>';
-        for(let n=a;n<=b;n++) h += '<button class="page-btn ' + (n===page?'active':'') + '" data-page="'+n+'">'+n+'</button>';
-        if(b<pages) h += '<button class="page-btn" data-page="'+pages+'">'+pages+'</button>';
-        return h + '<button class="page-btn" data-page="'+(page+1)+'"'+(page===pages?' disabled':'')+' aria-label="Next page">›</button></nav>';
+        const pages = Math.ceil(total / PAGE_SIZE); if (pages <= 1) return '';
+        let h = '<nav class="pagination" aria-label="Order pages"><button class="page-btn" data-page="' + (page - 1) + '"' + (page === 1 ? ' disabled' : '') + ' aria-label="Previous page">‹</button>';
+        const a = Math.max(1, page - 2), b = Math.min(pages, page + 2); if (a > 1) h += '<button class="page-btn" data-page="1">1</button>';
+        for (let n = a; n <= b; n++) h += '<button class="page-btn ' + (n === page ? 'active' : '') + '" data-page="' + n + '">' + n + '</button>';
+        if (b < pages) h += '<button class="page-btn" data-page="' + pages + '">' + pages + '</button>';
+        return h + '<button class="page-btn" data-page="' + (page + 1) + '"' + (page === pages ? ' disabled' : '') + ' aria-label="Next page">›</button></nav>';
       }
       function renderOrders() {
         const filtered = rows.filter(o => {
-          const code = String(o.order_code || ('PP'+String(o.id).padStart(3,'0'))).toLowerCase(), id=String(o.id||'').toLowerCase();
+          const code = String(o.order_code || ('PP' + String(o.id).padStart(3, '0'))).toLowerCase(), id = String(o.id || '').toLowerCase();
           return (!searchOrderId || code.includes(searchOrderId.toLowerCase()) || id.includes(searchOrderId.toLowerCase())) &&
-            (!statusFilter || o.status===statusFilter) && (!dateFilter || dateOnly(o.created_at)===dateFilter);
+            (!statusFilter || o.status === statusFilter) && (!dateFilter || dateOnly(o.created_at) === dateFilter);
         });
-        const pages=Math.max(1,Math.ceil(filtered.length/PAGE_SIZE)); currentPage=Math.min(Math.max(1,currentPage),pages);
-        const visible=filtered.slice((currentPage-1)*PAGE_SIZE,currentPage*PAGE_SIZE);
-        view.innerHTML = '<div class="my-orders-search"><div class="order-search-field"><span aria-hidden="true">⌕</span><input id="order-id-search" type="search" aria-label="Search order ID or code" placeholder="Enter order ID or order code…" value="'+PP.esc(searchOrderId)+'"><button class="btn order-search-button" id="order-search-submit" type="button">⌕ <span>Search</span></button></div><label class="sr-only" for="order-status-filter">Order status</label><select id="order-status-filter" aria-label="Filter by status"><option value="">All statuses</option><option value="waiting_pay"'+(statusFilter==='waiting_pay'?' selected':'')+'>Waiting Payment</option><option value="paid"'+(statusFilter==='paid'?' selected':'')+'>Paid</option><option value="success"'+(statusFilter==='success'?' selected':'')+'>Confirmed</option></select><label class="sr-only" for="order-date-filter">Filter by date</label><input id="order-date-filter" type="date" aria-label="Filter by order date" value="'+PP.esc(dateFilter)+'"></div>' +
-        (filtered.length ? '<div class="my-orders-list">'+visible.map(o => {
-          const code=PP.esc(o.order_code || ('PP'+String(o.id).padStart(3,'0'))), status=safeStatus(o.status);
-          const items=Array.isArray(o.items)&&o.items.length ? o.items : (o.product_name ? [{name:o.product_name,product_image:o.product_image,qty:1,price:0}] : []);
-          const itemCount=Number(o.item_count || items.reduce((sum,i)=>sum+Number(i.qty||1),0) || items.length);
-          const expanded = items.length > 5;
-          const shown = expanded ? items.slice(0, Math.min(items.length, 10)) : items;
-          const pay = o.status === 'waiting_pay';
-          const payUrl='/payment.html?id='+encodeURIComponent(o.id)+(o.token?'&t='+encodeURIComponent(o.token):'');
-          return '<article class="my-order-card"><div class="order-card-top"><div class="order-ident"><span class="order-bag-icon" aria-hidden="true">▤</span><div><div class="order-title-line"><h2>Order #'+code+'</h2><span class="order-item-count">'+itemCount+' '+(itemCount===1?'item':'items')+'</span></div><div class="order-date">▦ '+PP.esc(o.created_at?PP.date(o.created_at):'Date unavailable')+'</div></div></div><div class="order-status-area">'+statusTrack(o.status)+'</div><div class="order-total"><span>Total</span><strong>'+PP.money(o.total)+'</strong></div><div class="order-actions">'+(pay?'<a class="btn order-pay" href="'+payUrl+'">▣ <span>Pay now</span></a>':'')+'<a class="btn ghost order-view" href="'+payUrl+'" aria-label="View order '+code+'">◎ <span>View order</span></a></div></div>'+
-          '<div class="order-products-grid '+(items.length>=10?'compact-products':'')+'">'+(shown.length?shown.map(itemHtml).join(''):'<p class="muted">Product details are not available for this order.</p>')+(expanded?'<button type="button" class="order-view-all" data-order-items="'+PP.esc(String(o.id))+'">◇ <span>'+itemCount+' items</span><b>View all items ›</b></button>':'')+'</div></article>';
-        }).join('')+'</div>'+pager(filtered.length,currentPage)+'<p class="muted order-count-note">Showing '+filtered.length+' order'+(filtered.length===1?'':'s')+'</p>' : '<div class="empty"><p>No orders match your search and filters.</p><button class="btn ghost" id="clear-order-filters" type="button">Clear filters</button></div>');
-        const search=view.querySelector('#order-id-search');
-        const applySearch=()=>{searchOrderId=search.value.trim();currentPage=1;renderOrders();};
-        view.querySelector('#order-search-submit').onclick=applySearch;
-        search.onkeydown=e=>{if(e.key==='Enter')applySearch();};
-        view.querySelector('#order-status-filter').onchange=e=>{statusFilter=e.target.value;currentPage=1;renderOrders();};
-        view.querySelector('#order-date-filter').onchange=e=>{dateFilter=e.target.value;currentPage=1;renderOrders();};
-        const clear=view.querySelector('#clear-order-filters'); if(clear) clear.onclick=()=>{searchOrderId='';statusFilter='';dateFilter='';currentPage=1;renderOrders();};
-        view.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{currentPage=Number(b.dataset.page);renderOrders();});
-        view.querySelectorAll('[data-order-items]').forEach(b=>b.onclick=()=>openItems(b.dataset.orderItems));
+        const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)); currentPage = Math.min(Math.max(1, currentPage), pages);
+        const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+        view.innerHTML = '<div class="my-orders-search"><div class="order-search-field"><span aria-hidden="true">⌕</span><input id="order-id-search" type="search" aria-label="Search order ID or code" placeholder="Enter order ID or order code…" value="' + PP.esc(searchOrderId) + '"><button class="btn order-search-button" id="order-search-submit" type="button">⌕ <span>Search</span></button></div><label class="sr-only" for="order-status-filter">Order status</label><select id="order-status-filter" aria-label="Filter by status"><option value="">All statuses</option><option value="waiting_pay"' + (statusFilter === 'waiting_pay' ? ' selected' : '') + '>Waiting Payment</option><option value="paid"' + (statusFilter === 'paid' ? ' selected' : '') + '>Paid</option><option value="success"' + (statusFilter === 'success' ? ' selected' : '') + '>Confirmed</option></select><label class="sr-only" for="order-date-filter">Filter by date</label><input id="order-date-filter" type="date" aria-label="Filter by order date" value="' + PP.esc(dateFilter) + '"></div>' +
+          (filtered.length ? '<div class="my-orders-list">' + visible.map(o => {
+            const code = PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))), status = safeStatus(o.status);
+            const items = Array.isArray(o.items) && o.items.length ? o.items : (o.product_name ? [{ name: o.product_name, product_image: o.product_image, qty: 1, price: 0 }] : []);
+            const itemCount = Number(o.item_count || items.reduce((sum, i) => sum + Number(i.qty || 1), 0) || items.length);
+            const expanded = items.length > 5;
+            const shown = expanded ? items.slice(0, Math.min(items.length, 10)) : items;
+            const pay = o.status === 'waiting_pay';
+            const payUrl = '/payment.html?id=' + encodeURIComponent(o.id) + (o.token ? '&t=' + encodeURIComponent(o.token) : '');
+            return '<article class="my-order-card"><div class="order-card-top"><div class="order-ident"><span class="order-bag-icon" aria-hidden="true">▤</span><div><div class="order-title-line"><h2>Order #' + code + '</h2><span class="order-item-count">' + itemCount + ' ' + (itemCount === 1 ? 'item' : 'items') + '</span></div><div class="order-date">▦ ' + PP.esc(o.created_at ? PP.date(o.created_at) : 'Date unavailable') + '</div></div></div><div class="order-status-area">' + statusTrack(o.status) + '</div><div class="order-total"><span>Total</span><strong>' + PP.money(o.total) + '</strong></div><div class="order-actions">' + (pay ? '<a class="btn order-pay" href="' + payUrl + '">▣ <span>Pay now</span></a>' : '') + '<a class="btn ghost order-view" href="' + payUrl + '" aria-label="View order ' + code + '">◎ <span>View order</span></a></div></div>' +
+              '<div class="order-products-grid ' + (items.length >= 10 ? 'compact-products' : '') + '">' + (shown.length ? shown.map(itemHtml).join('') : '<p class="muted">Product details are not available for this order.</p>') + (expanded ? '<button type="button" class="order-view-all" data-order-items="' + PP.esc(String(o.id)) + '">◇ <span>' + itemCount + ' items</span><b>View all items ›</b></button>' : '') + '</div></article>';
+          }).join('') + '</div>' + pager(filtered.length, currentPage) + '<p class="muted order-count-note">Showing ' + filtered.length + ' order' + (filtered.length === 1 ? '' : 's') + '</p>' : '<div class="empty"><p>No orders match your search and filters.</p><button class="btn ghost" id="clear-order-filters" type="button">Clear filters</button></div>');
+        const search = view.querySelector('#order-id-search');
+        const applySearch = () => { searchOrderId = search.value.trim(); currentPage = 1; renderOrders(); };
+        view.querySelector('#order-search-submit').onclick = applySearch;
+        search.onkeydown = e => { if (e.key === 'Enter') applySearch(); };
+        view.querySelector('#order-status-filter').onchange = e => { statusFilter = e.target.value; currentPage = 1; renderOrders(); };
+        view.querySelector('#order-date-filter').onchange = e => { dateFilter = e.target.value; currentPage = 1; renderOrders(); };
+        const clear = view.querySelector('#clear-order-filters'); if (clear) clear.onclick = () => { searchOrderId = ''; statusFilter = ''; dateFilter = ''; currentPage = 1; renderOrders(); };
+        view.querySelectorAll('[data-page]').forEach(b => b.onclick = () => { currentPage = Number(b.dataset.page); renderOrders(); });
+        view.querySelectorAll('[data-order-items]').forEach(b => b.onclick = () => openItems(b.dataset.orderItems));
       }
       function openItems(id) {
-        const o=rows.find(x=>String(x.id)===String(id)); if(!o)return;
-        const items=Array.isArray(o.items)?o.items:[];
-        const modal=document.createElement('div'); modal.className='order-items-overlay'; modal.innerHTML='<section class="order-items-modal" role="dialog" aria-modal="true" aria-label="All order items"><button type="button" class="order-modal-close" aria-label="Close">×</button><h2>Order #'+PP.esc(o.order_code||('PP'+String(o.id).padStart(3,'0')))+' — All items</h2><div class="order-modal-products">'+items.map(itemHtml).join('')+'</div><div class="order-modal-total">Total <strong>'+PP.money(o.total)+'</strong></div></section>';
-        document.body.appendChild(modal); const close=()=>modal.remove(); modal.querySelector('.order-modal-close').onclick=close; modal.onclick=e=>{if(e.target===modal)close();}; modal.querySelector('.order-modal-close').focus();
+        const o = rows.find(x => String(x.id) === String(id)); if (!o) return;
+        const items = Array.isArray(o.items) ? o.items : [];
+        const modal = document.createElement('div'); modal.className = 'order-items-overlay'; modal.innerHTML = '<section class="order-items-modal" role="dialog" aria-modal="true" aria-label="All order items"><button type="button" class="order-modal-close" aria-label="Close">×</button><h2>Order #' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + ' — All items</h2><div class="order-modal-products">' + items.map(itemHtml).join('') + '</div><div class="order-modal-total">Total <strong>' + PP.money(o.total) + '</strong></div></section>';
+        document.body.appendChild(modal); const close = () => modal.remove(); modal.querySelector('.order-modal-close').onclick = close; modal.onclick = e => { if (e.target === modal) close(); }; modal.querySelector('.order-modal-close').focus();
       }
       renderOrders();
     })();

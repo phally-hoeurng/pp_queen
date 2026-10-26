@@ -13,6 +13,16 @@ const PP = {
       ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   },
 
+  // Helper to safely format image URLs whether they are Supabase links, relative paths, or filenames
+  imgUrl(src) {
+    if (!src) return '';
+    const s = String(src).trim();
+    if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/')) {
+      return s;
+    }
+    return '/uploads/' + encodeURIComponent(s);
+  },
+
   // product id shown to customers, e.g. PP05
   code(p) {
     return (p && p.product_code) || ('PP' + String((p && (p.product_id || p.id)) || 0).padStart(2, '0'));
@@ -49,8 +59,9 @@ const PP = {
   orderItemHtml(i, opts) {
     opts = opts || {};
     const code = PP.esc(PP.code(i));
-    const img = i.product_image
-      ? '<span class="oi-img"><img loading="lazy" src="' + PP.esc(i.product_image) + '" alt="' + PP.esc(i.name || 'Product') + '"></span>'
+    const url = PP.imgUrl(i.product_image || i.image);
+    const img = url
+      ? '<span class="oi-img"><img loading="lazy" src="' + PP.esc(url) + '" alt="' + PP.esc(i.name || 'Product') + '" onerror="this.onerror=null;this.parentElement.className=\'oi-img oi-none\';this.parentElement.innerHTML=\'PP\';"></span>'
       : '<span class="oi-img oi-none">PP</span>';
     return '<div class="oi' + (opts.cls ? ' ' + opts.cls : '') + '">' + img +
       '<div class="oi-text"><b>' + PP.esc(i.name || 'Product') + '</b>' +
@@ -417,25 +428,6 @@ const PP = {
       PP.config.name;
 
     const u = PP.user();
-
-    const link = (href, key, text) =>
-      '<a href="' +
-      href +
-      '"' +
-      (active === key ? ' class="active"' : '') +
-      '>' +
-      text +
-      '</a>';
-
-    const unpaid = PP.myOrders().filter(
-      (o) => o.status === 'waiting_pay'
-    ).length;
-
-    const bagIcon =
-      '<svg class="ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<path d="M6 7h12l1 13H5L6 7z"/>' +
-      '<path d="M9 7a3 3 0 0 1 6 0"/>' +
-      '</svg>';
 
     const header = document.getElementById('site-header');
 
