@@ -45,13 +45,13 @@ const PP = {
     shampoo: '<svg class="nav-ico" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 2h4v3h-4z"/><path d="M12 5v2"/><path d="M8 9a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V9z"/><path d="M8 13h8"/></svg>'
   },
 
-  // One ordered product: image (hover = zoom + product id), name, product id, qty.
+  // One ordered product: image (hover shows image only), name, product id, qty.
   orderItemHtml(i, opts) {
     opts = opts || {};
     const code = PP.esc(PP.code(i));
     const img = i.product_image
-      ? '<span class="oi-img" data-code="' + code + '"><img loading="lazy" src="' + PP.esc(i.product_image) + '" alt="' + PP.esc(i.name || 'Product') + '"></span>'
-      : '<span class="oi-img oi-none" data-code="' + code + '">PP</span>';
+      ? '<span class="oi-img"><img loading="lazy" src="' + PP.esc(i.product_image) + '" alt="' + PP.esc(i.name || 'Product') + '"></span>'
+      : '<span class="oi-img oi-none">PP</span>';
     return '<div class="oi' + (opts.cls ? ' ' + opts.cls : '') + '">' + img +
       '<div class="oi-text"><b>' + PP.esc(i.name || 'Product') + '</b>' +
       '<span class="oi-meta"><span class="oi-id">Product ID: ' + code + '</span><span class="oi-qty">Qty: ' + Number(i.qty || 1) + '</span></span></div>' +
@@ -509,10 +509,10 @@ const PP = {
 
         '<div>' +
         '<h4>Quick links</h4>' +
-        '<a href="/">Shop</a>' +
-        '<a href="/cart.html">Cart</a>' +
-        '<a href="/orders.html">My orders</a>' +
-        '<a href="#chat" data-open-chat>Chat with us</a>' +
+        '<a href="/"><span class="footer-link-icon" aria-hidden="true">⌂</span> Shop</a>' +
+        '<a href="/cart.html"><span class="footer-link-icon" aria-hidden="true">▣</span> Cart</a>' +
+        '<a href="/orders.html"><span class="footer-link-icon" aria-hidden="true">▤</span> My orders</a>' +
+        '<a href="#chat" data-open-chat><span class="footer-link-icon" aria-hidden="true">✉</span> Chat with us</a>' +
         '</div>' +
 
         '<div>' +
@@ -520,15 +520,15 @@ const PP = {
 
         (
           PP.config.phone
-            ? '<p>Phone: ' +
+            ? '<p><span class="footer-link-icon" aria-hidden="true">☎</span> Phone: ' +
             PP.esc(PP.config.phone) +
             '</p>'
             : ''
         ) +
 
-        (PP.config.facebookUrl ? '<p><a href="' + PP.esc(PP.config.facebookUrl) + '" target="_blank" rel="noopener noreferrer">Facebook Page</a></p>' : '') +
-        (PP.config.telegramUrl ? '<p><a href="' + PP.esc(PP.config.telegramUrl) + '" target="_blank" rel="noopener noreferrer">Telegram Group</a></p>' : '') +
-        (PP.config.address ? '<p>' + PP.esc(PP.config.address) + '</p>' : '') +
+        (PP.config.facebookUrl ? '<p><a href="' + PP.esc(PP.config.facebookUrl) + '" target="_blank" rel="noopener noreferrer"><span class="footer-link-icon" aria-hidden="true">f</span> Facebook Page</a></p>' : '') +
+        (PP.config.telegramUrl ? '<p><a href="' + PP.esc(PP.config.telegramUrl) + '" target="_blank" rel="noopener noreferrer"><span class="footer-link-icon" aria-hidden="true">➤</span> Telegram Group</a></p>' : '') +
+        (PP.config.address ? '<p><span class="footer-link-icon" aria-hidden="true">⌖</span> ' + PP.esc(PP.config.address) + '</p>' : '') +
 
         '<p>Pay by QR. Order updates come to you fast.</p>' +
 

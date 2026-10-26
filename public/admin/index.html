@@ -40,7 +40,7 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const STATUS = { waiting_pay: 'Waiting Payment', paid: 'Paid', success: 'Confirmed' };
-    const statusClass = { waiting_pay: 'warn', paid: 'ok', success: 'dark' };
+    const statusClass = { waiting_pay: 'warn', paid: 'ok', success: 'confirmed' };
     const badge = (s) => '<span class="badge ' + (statusClass[s] || '') + '">' + (STATUS[s] || s) + '</span>';
     function flash(text, ok) {
       $('msg').innerHTML = '<div class="alert ' + (ok ? 'ok' : 'error') + '">' + PP.esc(text) + '</div>';
@@ -375,18 +375,37 @@
             '<div class="row order-toolbar" style="margin-bottom:14px">' + (title ? '<h2 style="margin:0">' + title + '</h2>' : '<h2 style="margin:0">Orders</h2>') + (!forcedStatus ? '<select id="o-filter" style="flex:0 1 240px" aria-label="Filter by status"><option value="">All orders</option>' + ['waiting_pay', 'paid', 'success'].map((s) => '<option value="' + s + '"' + (s === keep ? ' selected' : '') + '>' + STATUS[s] + '</option>').join('') + '</select>' : '') + '</div>' +
             (list.length ? '<div class="table-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Phone</th><th>Price</th><th>Status</th><th>Date</th><th>Action</th></tr></thead><tbody>' +
               visible.map((o) => '<tr><td><b>' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</b></td><td>' + PP.esc(o.customer_name) + '</td><td>' + PP.esc(o.phone) + '</td><td>' + PP.money(o.total) + '</td><td>' + badge(o.status) +
-                (o.payment_screenshot ? ' <span class="badge">Payment Proof</span>' : '') + '</td><td>' + PP.date(o.created_at) + '</td>' +
-                '<td><button class="btn small" data-open="' + o.id + '">Open</button></td></tr>').join('') + '</tbody></table></div>' + pagerMarkup(list.length, page, 'orders-' + pageKey)
+                (o.payment_screenshot ? ' <span class="badge receipt-uploaded">Receipt uploaded</span>' : '') + '</td><td>' + PP.date(o.created_at) + '</td>' +
+                '<td><div class="row order-actions">' +
+                '<button type="button" class="btn small ghost icon-action order-view-action" data-open="' + o.id + '" title="View order" aria-label="View order ' + PP.esc(o.order_code || o.id) + '">' + UI_ICONS.view + '</button>' +
+                '<button type="button" class="btn small danger icon-action order-delete-action" data-delete-order="' + o.id + '" data-order-code="' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '" title="Delete order" aria-label="Delete order ' + PP.esc(o.order_code || o.id) + '">' + UI_ICONS.delete + '</button>' +
+                '</div></td></tr>').join('') + '</tbody></table></div>' + pagerMarkup(list.length, page, 'orders-' + pageKey)
               : '<div class="empty">No orders found.</div>');
           if (!forcedStatus && $('o-filter')) $('o-filter').onchange = () => { orderPages[$('o-filter').value || 'all'] = 1; loadOrders(); };
           section.querySelectorAll('.pagination[data-pager]').forEach((nav) => nav.querySelectorAll('[data-page]').forEach((b) => b.onclick = () => {
             orderPages[pageKey] = Number(b.dataset.page); render();
           }));
           section.querySelectorAll('[data-open]').forEach((b) => b.onclick = () => orderDetail(+b.dataset.open));
+          section.querySelectorAll('[data-delete-order]').forEach((b) => b.onclick = () => deleteOrder(+b.dataset.deleteOrder, b.dataset.orderCode));
         };
         render();
       } catch (e) { flash(e.message); }
     }
+
+
+    async function deleteOrder(id, code) {
+      if (!confirm('Delete order ' + (code || ('PP' + String(id).padStart(3, '0'))) + '? This cannot be undone. Stock will be restored if the order was not confirmed.')) return;
+      try {
+        await PP.api('/orders/admin/' + id, { method: 'DELETE' });
+        flash('Order deleted.', true);
+        await Promise.all([
+          loadOrders(),
+          loadOrders('waiting_pay', 'Waiting Payment'),
+          loadOrders('paid', 'Waiting Confirm')
+        ]);
+      } catch (e) { flash(e.message || 'Could not delete order.'); }
+    }
+
     function renderAdminOrderItems(items, page) {
       const size = PAGE_SIZE;
       const pages = Math.max(1, Math.ceil(items.length / size));
@@ -408,12 +427,13 @@
           '<p><b>' + PP.esc(o.customer_name) + '</b><br>' + PP.esc(o.phone) + '<br>' + PP.esc(o.address) + (o.note ? '<br><i>Note: ' + PP.esc(o.note) + '</i>' : '') + '</p>' +
           '<h3 class="oi-heading">Products in this order · ' + PP.esc(o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + '</h3><div class="order-detail-items" id="admin-order-items-list"></div><div id="admin-order-items-pagination"></div>' +
           '<div class="sum-row total"><span>Total</span><span>' + PP.money(o.total) + '</span></div>' +
-          (o.payment_screenshot_url ? '<p><b>Payment Proof</b></p>' + (/\.pdf(?:$|[?#])/i.test(o.payment_screenshot_url) ? '<a class="btn ghost" href="' + o.payment_screenshot_url + '" target="_blank" rel="noopener">Open payment PDF</a>' : '<a href="' + o.payment_screenshot_url + '" target="_blank" rel="noopener"><img class="shot" src="' + o.payment_screenshot_url + '" alt="Payment proof uploaded by customer"></a>') : '<p class="muted">No payment proof uploaded.</p>') +
-          '<div class="row" style="margin-top:18px">' + btns.map((b) => '<button class="btn ' + b[2] + '" data-st="' + b[0] + '">' + b[1] + '</button>').join('') + '<button class="btn ghost" id="o-close">Close</button></div></div>';
+          (o.payment_screenshot_url ? '<p><b>Receipt uploaded</b></p>' + (/\.pdf(?:$|[?#])/i.test(o.payment_screenshot_url) ? '<a class="btn ghost" href="' + o.payment_screenshot_url + '" target="_blank" rel="noopener">Open payment PDF</a>' : '<a href="' + o.payment_screenshot_url + '" target="_blank" rel="noopener"><img class="shot" src="' + o.payment_screenshot_url + '" alt="Payment proof uploaded by customer"></a>') : '<p class="muted">No payment proof uploaded.</p>') +
+          '<div class="row" style="margin-top:18px">' + btns.map((b) => '<button class="btn ' + b[2] + '" data-st="' + b[0] + '">' + b[1] + '</button>').join('') + '<button class="btn danger" id="o-delete">Delete Order</button><button class="btn ghost" id="o-close">Close</button></div></div>';
         document.body.appendChild(bg);
         renderAdminOrderItems(o.items || [], 1);
         const close = () => bg.remove();
         bg.querySelector('#o-close').onclick = close; bg.onclick = (e) => { if (e.target === bg) close(); };
+        bg.querySelector('#o-delete').onclick = async () => { close(); await deleteOrder(o.id, o.order_code || ('PP' + String(o.id).padStart(3, '0'))); };
         bg.querySelectorAll('[data-st]').forEach((b) => b.onclick = async () => {
           b.disabled = true;
           try { await PP.api('/orders/admin/' + o.id + '/status', { method: 'PATCH', body: { status: b.dataset.st } }); close(); flash('Order ' + (o.order_code || ('PP' + String(o.id).padStart(3, '0'))) + ' is now ' + (STATUS[b.dataset.st] || b.dataset.st) + '.', true); loadOrders(); loadOrders('waiting_pay', 'Waiting Payment'); loadOrders('paid', 'Waiting Confirm'); }
@@ -423,31 +443,96 @@
     }
 
     /* ---------- Chat with customers ---------- */
-    let chatId = null, chatLast = 0, chatTimer = null, listTimer = null, chatShown = {};
+    let chatId = null, chatLast = 0, chatTimer = null, listTimer = null, chatShown = {}, chatListCache = [];
     const SEND_ICON = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+    const CHAT_EMOJIS = ['😀','😁','😂','🥰','😍','😊','😉','🙌','👍','🙏','❤️','💖','🎉','✨','😢','😅','🤔','👌','📦','💬'];
+    function attachEmojiPicker(buttonId, pickerId, inputId) {
+      const button = $(buttonId), picker = $(pickerId), input = $(inputId);
+      if (!button || !picker || !input) return;
+      picker.innerHTML = CHAT_EMOJIS.map((emoji) => '<button type="button" class="chat-emoji-option" aria-label="' + emoji + '">' + emoji + '</button>').join('');
+      button.onclick = () => picker.classList.toggle('hidden');
+      picker.querySelectorAll('button').forEach((b) => b.onclick = () => {
+        const start = input.selectionStart == null ? input.value.length : input.selectionStart;
+        const end = input.selectionEnd == null ? input.value.length : input.selectionEnd;
+        input.value = input.value.slice(0, start) + b.textContent + input.value.slice(end);
+        input.focus();
+        const caret = start + b.textContent.length;
+        try { input.setSelectionRange(caret, caret); } catch (e) { /* unsupported input type */ }
+        picker.classList.add('hidden');
+      });
+    }
     const hhmm = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const dayTime = (d) => { const t = new Date(d); return t.toDateString() === new Date().toDateString() ? hhmm(d) : t.toLocaleDateString([], { month: 'short', day: 'numeric' }); };
 
     async function loadChat() {
       chatId = null;
-      $('tab-chat').innerHTML = '<div class="chat-admin" id="ca"><div class="chat-list" id="c-list"></div>' +
+      $('tab-chat').innerHTML = '<div class="chat-admin" id="ca"><aside class="chat-sidebar"><div class="chat-search-wrap"><span aria-hidden="true">⌕</span><input id="c-search" type="search" placeholder="Search customer..." aria-label="Search customer"></div><div class="chat-filters"><button type="button" class="on" data-chat-filter="all">All</button><button type="button" data-chat-filter="unread">Unread</button><button type="button" data-chat-filter="read">Read</button></div><div class="chat-list" id="c-list"></div></aside>' +
         '<div class="chat-thread" id="c-thread"><div class="chat-empty">Select a conversation.</div></div></div>';
+      $('c-search').addEventListener('input', filterChatList);
+      $('tab-chat').querySelectorAll('[data-chat-filter]').forEach((b) => b.onclick = () => { $('tab-chat').querySelectorAll('[data-chat-filter]').forEach((x) => x.classList.toggle('on', x === b)); filterChatList(); });
       await refreshChatList();
       clearInterval(listTimer);
-      listTimer = setInterval(() => { if (!document.hidden) refreshChatList(); }, 5000);
+      listTimer = setInterval(() => { if (!document.hidden) refreshChatList(); }, 8000);
+      const requestedChatId = Number(new URLSearchParams(window.location.search).get('chatId'));
+      if (requestedChatId > 0) openThread(requestedChatId);
     }
 
     async function refreshChatList() {
       try {
         const list = await PP.api('/chat/admin/list');
+        chatListCache = list;
         const box = $('c-list'); if (!box) return;
+        renderChatList();
+      } catch (e) { /* try again on the next refresh */ }
+    }
+
+    function renderChatList() {
+        const list = chatListCache; const box = $('c-list'); if (!box) return;
         box.innerHTML = list.length ? list.map((c) =>
-          '<button type="button" class="chat-item' + (c.id === chatId ? ' on' : '') + '" data-c="' + c.id + '">' +
+          '<div class="chat-item-row' + (c.id === chatId ? ' on' : '') + '" data-chat-row="' + c.id + '">' +
+          '<button type="button" class="chat-item" data-c="' + c.id + '" aria-label="Open chat with ' + PP.esc(c.customer_name || 'Guest') + '">' +
           '<b><span>' + PP.esc(c.customer_name || 'Guest') + '</span>' + (c.admin_unread && c.id !== chatId ? '<span class="unread">' + c.admin_unread + '</span>' : '') + '</b>' +
-          '<span class="snip">' + PP.esc(c.last_body || '') + '</span><span class="when">' + dayTime(c.last_message_at) + '</span></button>').join('')
+          '<span class="snip">' + PP.esc(c.last_body || 'No messages yet') + '</span><span class="when">' + dayTime(c.last_message_at) + '</span></button>' +
+          '<button type="button" class="chat-list-delete" data-delete-chat="' + c.id + '" title="Delete chat" aria-label="Delete chat with ' + PP.esc(c.customer_name || 'Guest') + '">' + UI_ICONS.delete + '</button></div>').join('')
           : '<div class="chat-empty">No conversations yet.</div>';
         box.querySelectorAll('[data-c]').forEach((b) => b.onclick = () => openThread(+b.dataset.c));
-      } catch (e) { /* try again on the next refresh */ }
+        box.querySelectorAll('[data-delete-chat]').forEach((b) => b.onclick = (event) => deleteChatFromList(event, Number(b.dataset.deleteChat), b));
+        filterChatList();
+    }
+
+    function filterChatList() {
+      const q = (($('c-search') && $('c-search').value) || '').trim().toLowerCase();
+      const filter = ($('tab-chat').querySelector('[data-chat-filter].on') || {}).dataset?.chatFilter || 'all';
+      $('c-list').querySelectorAll('[data-chat-row]').forEach((el) => {
+        const item = chatListCache.find((c) => c.id === Number(el.dataset.chatRow));
+        if (!item) { el.hidden = true; return; }
+        const matches = !q || ((item.customer_name || 'Guest') + ' ' + (item.last_body || '')).toLowerCase().includes(q);
+        const unread = Number(item.admin_unread) > 0;
+        el.hidden = !matches || (filter === 'unread' && !unread) || (filter === 'read' && unread);
+        el.classList.toggle('on', item.id === chatId);
+      });
+    }
+
+    async function deleteChatFromList(event, deletingId, button) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!Number.isInteger(deletingId) || deletingId < 1 || button.dataset.busy === '1') return;
+      const item = chatListCache.find((c) => c.id === deletingId);
+      const customer = (item && item.customer_name) || 'this customer';
+      if (!window.confirm('Delete the chat with ' + customer + ' and its messages? Customer orders and payment records will be kept.')) return;
+      button.dataset.busy = '1'; button.disabled = true;
+      try {
+        await PP.api('/chat/admin/' + deletingId, { method: 'DELETE' });
+        if (chatId === deletingId) {
+          chatId = null; clearInterval(chatTimer); $('ca').classList.remove('open-thread', 'chat-focus');
+          $('c-thread').innerHTML = '<div class="chat-empty">Select a conversation.</div>';
+        }
+        await refreshChatList();
+        flash('Chat deleted successfully.', true);
+      } catch (e) {
+        flash((e && e.message) || 'Could not delete chat. Please try again.', false);
+        button.disabled = false; button.dataset.busy = '0';
+      }
     }
 
     function addChatMsg(body, m) {
@@ -455,9 +540,18 @@
       chatShown[m.id] = true;
       const wrap = document.createElement('div');
       wrap.className = 'msg ' + (m.sender === 'admin' ? 'me' : 'admin');   // your replies on the right
-      const b = document.createElement('div'); b.className = 'bubble'; b.textContent = m.body;
+      wrap.dataset.messageId = m.id;
+      const b = document.createElement('div'); b.className = 'bubble';
+      if (m.body) { const txt = document.createElement('div'); txt.textContent = m.body; b.appendChild(txt); }
+      if (m.image_url) { const img = document.createElement('img'); img.src = m.image_url; img.alt = 'Chat image attachment'; img.className = 'chat-message-image'; img.loading = 'lazy'; img.tabIndex = 0; img.title = 'Click to enlarge'; img.onclick = () => window.open(m.image_url, '_blank', 'noopener'); b.appendChild(img); }
       const t = document.createElement('small'); t.textContent = dayTime(m.created_at);
-      wrap.appendChild(b); wrap.appendChild(t); body.appendChild(wrap);
+      wrap.appendChild(b); wrap.appendChild(t);
+      if (m.sender === 'admin') {
+        const actions = document.createElement('div'); actions.className = 'chat-message-actions';
+        actions.innerHTML = '<button type="button" data-msg-edit="' + m.id + '" title="Edit message" aria-label="Edit message"><span aria-hidden="true">✎</span></button><button type="button" data-msg-delete="' + m.id + '" title="Delete message" aria-label="Delete message"><span aria-hidden="true">▤</span></button>';
+        wrap.appendChild(actions);
+      }
+      body.appendChild(wrap);
     }
 
     async function pollThread(first) {
@@ -480,15 +574,47 @@
       clearInterval(chatTimer);
       $('ca').classList.add('open-thread');
       $('c-thread').innerHTML =
-        '<div class="chat-thread-head"><button type="button" class="btn small back" id="c-back">Back</button><span id="c-name"></span><button type="button" class="btn small danger" id="c-delete">Delete</button></div>' +
+        '<div class="chat-thread-head"><div class="chat-person"><span class="chat-avatar" aria-hidden="true">♙</span><span><b id="c-name">Customer</b><small>PP Queen customer chat</small></span></div><div class="chat-head-actions"><button type="button" class="chat-icon-btn chat-full-btn" id="c-full" title="Full chat" aria-label="Full chat">⤢ <span>Full Chat</span></button><button type="button" class="chat-close-thread" id="c-back" title="Close conversation" aria-label="Close conversation">×</button></div></div>' +
         '<div class="chat-body" id="c-body"></div><div class="chat-err hidden" id="c-err"></div>' +
-        '<form class="chat-form" id="c-form"><input id="c-input" maxlength="1000" placeholder="Write a reply" autocomplete="off" aria-label="Write a reply"><button class="chat-send" aria-label="Send">' + SEND_ICON + '</button></form>';
-      $('c-back').onclick = () => { $('ca').classList.remove('open-thread'); chatId = null; clearInterval(chatTimer); refreshChatList(); };
-      $('c-delete').onclick = async () => { if (!chatId || !confirm('Delete this customer chat?')) return; try { await PP.api('/chat/admin/' + chatId, { method: 'DELETE' }); $('ca').classList.remove('open-thread'); chatId = null; clearInterval(chatTimer); refreshChatList(); flash('Chat deleted.', true); } catch (e) { flash(e.message); } };
+        '<form class="chat-form" id="c-form"><input id="c-input" maxlength="1000" placeholder="Write a reply..." autocomplete="off" aria-label="Write a reply" required><button class="chat-send" type="submit" aria-label="Send reply" title="Send reply">' + SEND_ICON + '</button></form>'; 
+      // Keep compact and full-screen chat controls working from the same handlers.
+      const closeThread = () => {
+        $('ca').classList.remove('open-thread', 'chat-focus');
+        chatId = null;
+        clearInterval(chatTimer);
+        refreshChatList();
+      };
+      // The X exits Full Chat first; in compact view it closes the selected conversation.
+      $('c-back').onclick = (event) => {
+        event.preventDefault(); event.stopPropagation();
+        if ($('ca').classList.contains('chat-focus')) {
+          $('ca').classList.remove('chat-focus');
+          $('c-full').classList.remove('active');
+          $('c-full').setAttribute('aria-label', 'Full chat');
+          $('c-full').title = 'Full chat';
+          return;
+        }
+        closeThread();
+      };
+      $('c-full').onclick = (event) => {
+        event.preventDefault(); event.stopPropagation();
+        const isFull = $('ca').classList.toggle('chat-focus');
+        $('c-full').classList.toggle('active', isFull);
+        $('c-full').setAttribute('aria-label', isFull ? 'Exit full chat' : 'Full chat');
+        $('c-full').title = isFull ? 'Exit full chat' : 'Full chat';
+      };
+      $('c-body').addEventListener('click', async (event) => {
+        const edit = event.target.closest('[data-msg-edit]'); const del = event.target.closest('[data-msg-delete]');
+        const msgId = Number((edit || del || {}).dataset && ((edit || del).dataset.msgEdit || (edit || del).dataset.msgDelete));
+        if (!msgId) return;
+        const wrap = $('c-body').querySelector('[data-message-id="' + msgId + '"]'); const bubble = wrap && wrap.querySelector('.bubble'); if (!bubble) return;
+        if (edit) { const value = prompt('Edit your message:', bubble.textContent); if (value === null || !value.trim()) return; try { const updated = await PP.api('/chat/admin/' + id + '/messages/' + msgId, { method: 'PUT', body: { body: value.trim() } }); bubble.textContent = updated.body; flash('Message updated.', true); } catch (e) { flash(e.message, false); } }
+        if (del && confirm('Delete this message? This cannot be undone.')) { try { await PP.api('/chat/admin/' + id + '/messages/' + msgId, { method: 'DELETE' }); wrap.remove(); delete chatShown[msgId]; flash('Message deleted.', true); } catch (e) { flash(e.message, false); } }
+      });
       $('c-form').onsubmit = async (e) => {
         e.preventDefault();
         const inp = $('c-input'), text = inp.value.trim(), err = $('c-err');
-        if (!text) return;
+        if (!text) { inp.focus(); return; }
         inp.disabled = true; err.classList.add('hidden');
         try {
           await PP.api('/chat/admin/' + id + '/messages', { method: 'POST', body: { body: text } });
@@ -498,7 +624,7 @@
         inp.disabled = false; inp.focus();
       };
       await pollThread(true);
-      chatTimer = setInterval(pollThread, 3000);
+      chatTimer = setInterval(pollThread, 4000);
       refreshChatList(); pollUnread();
       $('c-input').focus();
     }
@@ -519,9 +645,10 @@
       if (!PP.requireLogin(true)) return;
       document.querySelectorAll('.admin-tabs button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
       baseTitle = document.title;
-      showTab('dash');
+      const initialTab = new URLSearchParams(window.location.search).get('tab');
+      showTab(initialTab === 'chat' ? 'chat' : 'dash');
       pollUnread();
-      setInterval(() => { if (!document.hidden) pollUnread(); }, 10000);
+      setInterval(() => { if (!document.hidden) pollUnread(); }, 15000);
       // new payment screenshots show up on the Orders tab without pressing refresh
       setInterval(() => {
         if (document.hidden || document.querySelector('.modal-bg')) return;

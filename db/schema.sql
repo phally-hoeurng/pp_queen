@@ -93,9 +93,12 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   id         SERIAL PRIMARY KEY,
   chat_id    INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   sender     TEXT NOT NULL CHECK (sender IN ('customer','admin')),
-  body       TEXT NOT NULL,
+  body       TEXT NOT NULL DEFAULT '',
+  image_url  TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS image_url TEXT;
+ALTER TABLE chat_messages ALTER COLUMN body SET DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_chat_msgs ON chat_messages(chat_id, id);
 CREATE INDEX IF NOT EXISTS idx_chats_last ON chats(last_message_at DESC);

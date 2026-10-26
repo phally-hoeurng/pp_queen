@@ -13,11 +13,15 @@ async function sendTelegram(text) {
   try {
     const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true })
     });
-    if (!res.ok) console.error('Telegram error:', res.status, await res.text());
-    return res.ok;
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || !payload || payload.ok !== true) {
+      console.error('Telegram sendMessage error:', res.status, payload && payload.description ? payload.description : 'Unknown Telegram API response');
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error('Telegram failed:', err.message);
     return false;

@@ -33,6 +33,7 @@
       try {
         const p = await PP.api('/products/' + encodeURIComponent(id));
         document.title = p.name + ' | ' + PP.config.name;
+        window.PP_CHAT_PRODUCT_CODE = PP.code(p);
         const soldOut = p.stock <= 0;
         view.innerHTML =
           '<div class="detail">' +

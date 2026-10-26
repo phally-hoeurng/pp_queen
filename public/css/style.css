@@ -1932,9 +1932,58 @@ h2#products {
 
 .chat-form input {
   flex: 1;
+  min-width: 0;
   border-radius: 99px;
   padding: 10px 16px;
 }
+
+.chat-compose {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.chat-emoji-btn {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  font-size: 1.25rem;
+}
+
+.chat-emoji-btn:hover { background: var(--pink-wash); }
+
+.chat-emoji-picker {
+  position: absolute;
+  z-index: 1300;
+  left: 0;
+  bottom: 50px;
+  width: 220px;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(0,0,0,.18);
+}
+
+.chat-emoji-option {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 5px 0;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.chat-emoji-option:hover { background: var(--pink-wash); }
+
+.chat-form .chat-emoji-btn { flex: 0 0 42px; }
 
 .chat-send {
   flex: none;
@@ -1995,6 +2044,46 @@ h2#products {
   max-height: 600px;
   background: #fff;
 }
+
+/* Chat list rows keep the customer name/message and delete action together. */
+.chat-item-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.chat-item-row:hover { background: var(--pink-wash); }
+.chat-item-row.on { background: var(--pink-soft); box-shadow: inset 4px 0 0 var(--pink); }
+.chat-item-row .chat-item {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-bottom: 0;
+  padding: 12px 8px 12px 14px;
+  background: transparent;
+}
+.chat-item-row .chat-item.on { box-shadow: none; }
+.chat-list-delete {
+  align-self: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  margin: 0 8px 0 2px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #ffd0df;
+  border-radius: 10px;
+  color: #dc244f;
+  background: #fff;
+  cursor: pointer;
+}
+.chat-list-delete svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.chat-list-delete:hover { background: #fff0f5; border-color: #f59abb; }
+.chat-list-delete:disabled { opacity: .55; cursor: wait; }
+.chat-thread-head .chat-close-thread { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.chat-focus .chat-thread-head .chat-close-thread { display: inline-flex; visibility: visible; opacity: 1; }
 
 .chat-item {
   display: block;
@@ -4250,7 +4339,7 @@ body {
   flex: 0 0 auto;
 }
 
-/* ordered products: bigger image, hover = zoom + product ID, name / product ID / qty */
+/* ordered products: hover enlarges the image only; product details remain beside it */
 .oi {
   display: flex;
   align-items: center;
@@ -4308,20 +4397,6 @@ body {
     box-shadow: 0 10px 28px rgba(0, 0, 0, .28);
   }
 
-  .oi-img[data-code]:hover::after {
-    content: attr(data-code);
-    position: absolute;
-    left: 0;
-    top: calc(var(--s) * 2.4 + 6px);
-    padding: 3px 10px;
-    border-radius: 999px;
-    background: var(--pink-deep);
-    color: #fff;
-    font: 800 .78rem/1.5 var(--num, var(--sans));
-    letter-spacing: .04em;
-    white-space: nowrap;
-    pointer-events: none;
-  }
 }
 
 .oi-text {
@@ -5291,4 +5366,440 @@ th {
   #tab-products .product-columns { grid-template-columns: minmax(0,1fr); }
   #tab-products .product-list-block { padding: 12px; }
   #tab-products .admin-products-table { min-width: 500px; }
+}
+
+/* ---------- PP Queen chat polish: search, filters, message actions ---------- */
+.chat-admin {
+  grid-template-columns: minmax(245px, 29%) minmax(0, 1fr);
+  gap: 14px;
+  min-height: 560px;
+  align-items: stretch;
+}
+.chat-sidebar {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 8px 28px rgba(224, 45, 117, .06);
+}
+.chat-search-wrap {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 14px 10px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 13px; color: var(--muted);
+  background: #fff; min-height: 44px;
+}
+.chat-search-wrap span { font-size: 1.35rem; line-height: 1; }
+.chat-search-wrap input { width: 100%; min-width: 0; border: 0; outline: 0; box-shadow: none; background: transparent; color: var(--ink); font: inherit; }
+.chat-search-wrap input:focus { box-shadow: none; }
+.chat-filters { display: flex; gap: 7px; padding: 0 14px 12px; border-bottom: 1px solid var(--line); }
+.chat-filters button { flex: 1; border: 1px solid transparent; border-radius: 10px; padding: 8px 5px; color: var(--muted); background: #fff7fa; cursor: pointer; font: inherit; font-weight: 600; font-size: .86rem; }
+.chat-filters button.on { color: #fff; background: linear-gradient(135deg, var(--pink), var(--pink-deep)); box-shadow: 0 5px 14px rgba(224,45,117,.2); }
+.chat-list { flex: 1; max-height: 650px; min-height: 300px; border: 0; border-radius: 0; }
+.chat-item { position: relative; min-height: 78px; padding: 14px 34px 12px 15px; }
+.chat-item .snip { margin-top: 5px; max-width: 100%; }
+.chat-item .when { display: block; margin-top: 5px; }
+.chat-item-arrow { position: absolute; right: 13px; top: 50%; transform: translateY(-50%); color: var(--pink); font-size: 1.5rem; }
+.chat-item[hidden] { display: none !important; }
+.chat-thread { min-width: 0; min-height: 560px; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 8px 28px rgba(224,45,117,.06); }
+.chat-thread-head { justify-content: space-between; gap: 12px; padding: 14px 16px; color: var(--ink); background: #fff; border-bottom: 1px solid var(--line); }
+.chat-thread-head { position: relative; z-index: 30; isolation: isolate; flex: 0 0 auto; min-width: 0; overflow: visible; }
+.chat-person { display: flex; align-items: center; gap: 11px; min-width: 0; flex: 1 1 auto; }
+.chat-person > span:last-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.chat-person b { font-size: 1rem; }
+.chat-person small { color: var(--muted); font-weight: 400; }
+.chat-avatar { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; background: #ffe4ef; color: var(--pink-deep); font-size: 1.5rem; }
+.chat-head-actions { position: relative; z-index: 40; isolation: isolate; display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 0 auto; pointer-events: auto; }
+.chat-icon-btn { position: relative; z-index: 50; pointer-events: auto; touch-action: manipulation; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 0 13px; border: 1px solid var(--line); border-radius: 12px; background: white; color: var(--pink-deep); cursor: pointer; font: inherit; font-weight: 700; white-space: nowrap; }
+.chat-full-btn { color: white; background: linear-gradient(135deg, var(--pink), var(--pink-deep)); border-color: transparent; }
+.chat-delete-chat { color: #dc244f; cursor: pointer; flex-shrink: 0; }
+.chat-thread-head button { pointer-events: auto; }
+.chat-close-thread { position: relative; z-index: 7; pointer-events: auto; flex: 0 0 auto; border: 0; background: transparent; color: var(--pink-deep); cursor: pointer; font-size: 1.7rem; line-height: 1; padding: 4px; }
+.chat-thread .chat-body { flex: 1; min-height: 360px; max-height: none; padding: 22px 20px; background: linear-gradient(145deg, #fffafd, #fff5f9); }
+.chat-thread .chat-form { padding: 10px 14px; border-top: 1px solid var(--line); background: #fff; }
+.chat-message-actions { display: flex; gap: 5px; margin-top: 4px; opacity: .35; transition: opacity .15s ease; }
+.msg:hover .chat-message-actions, .chat-message-actions:focus-within { opacity: 1; }
+.chat-message-actions button { width: 28px; height: 26px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--pink-deep); cursor: pointer; }
+.chat-message-actions button[data-msg-delete], .chat-message-actions button[data-customer-delete] { color: #dc244f; }
+.chat-message-actions button:hover { background: #ffe8f1; }
+.chat-focus { grid-template-columns: minmax(0, 1fr); }
+.chat-focus .chat-sidebar { display: none; }
+.chat-focus .chat-thread { min-height: 650px; }
+.chat-clear { border: 1px solid rgba(255,255,255,.45); border-radius: 10px; padding: 6px 9px; color: #fff; background: rgba(255,255,255,.13); cursor: pointer; font-size: 1rem; }
+.chat-clear:hover { background: rgba(255,255,255,.25); }
+#chat-panel .chat-head { gap: 10px; }
+#chat-panel .chat-head > div { flex: 1; min-width: 0; }
+#chat-panel .chat-message-actions { opacity: .25; }
+#chat-panel .msg:hover .chat-message-actions, #chat-panel .chat-message-actions:focus-within { opacity: 1; }
+@media (max-width: 860px) {
+  .chat-admin { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+  .chat-sidebar { max-height: 70vh; }
+  .chat-thread { min-height: 70vh; }
+  .chat-admin.open-thread .chat-sidebar { display: none; }
+  .chat-admin:not(.open-thread) .chat-thread { display: none; }
+  .chat-thread-head { flex-wrap: wrap; align-items: center; }
+  .chat-person { flex: 1 1 150px; }
+  .chat-head-actions { gap: 5px; margin-left: auto; max-width: 100%; }
+  .chat-icon-btn { min-height: 36px; padding: 0 9px; font-size: .85rem; }
+}
+@media (max-width: 520px) {
+  .chat-icon-btn span { display: none; }
+  .chat-thread-head { padding: 10px; }
+  .chat-thread .chat-body { padding: 14px 10px; }
+  .chat-search-wrap { margin: 10px; }
+  .chat-filters { padding: 0 10px 10px; }
+}
+
+/* Chat image attachments: responsive in compact and Full Chat views. */
+.chat-message-image { display:block; width:auto; max-width:min(260px, 100%); max-height:260px; object-fit:contain; border-radius:12px; margin-top:8px; cursor:zoom-in; border:1px solid rgba(235,45,120,.18); }
+.chat-focus .chat-message-image { max-width:min(460px, 100%); max-height:48vh; }
+.chat-attach-btn { border:0; cursor:pointer; color:var(--pink, #e82e78); }
+.chat-form .chat-attach-btn { flex:0 0 38px; }
+@media (max-width:600px) { .chat-message-image { max-width:min(220px, 72vw); max-height:220px; } }
+
+/* Refined order-table actions: consistent with the pink product action buttons. */
+#tab-orders .order-actions, #tab-waiting-pay .order-actions, #tab-waiting-confirm .order-actions {
+  display: inline-flex; align-items: center; justify-content: flex-start; gap: 6px; flex-wrap: nowrap; min-width: 112px;
+}
+#tab-orders .order-actions .icon-action, #tab-waiting-pay .order-actions .icon-action, #tab-waiting-confirm .order-actions .icon-action {
+  width: 31px; height: 31px; min-width: 31px; padding: 0; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; transition: transform .16s ease, background .16s ease, box-shadow .16s ease;
+}
+#tab-orders .order-actions .icon-action svg, #tab-waiting-pay .order-actions .icon-action svg, #tab-waiting-confirm .order-actions .icon-action svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#tab-orders .order-view-action, #tab-waiting-pay .order-view-action, #tab-waiting-confirm .order-view-action { color: #c21868; background: #ffe4f0; border: 1px solid #f4b0d0; }
+#tab-orders .order-view-action:hover, #tab-waiting-pay .order-view-action:hover, #tab-waiting-confirm .order-view-action:hover { color: #fff; background: #df4388; border-color: #df4388; transform: translateY(-1px); }
+#tab-orders .order-delete-action, #tab-waiting-pay .order-delete-action, #tab-waiting-confirm .order-delete-action { color: #c2415d; background: #fff0f0; border: 1px solid #f3c0c7; }
+#tab-orders .order-delete-action:hover, #tab-waiting-pay .order-delete-action:hover, #tab-waiting-confirm .order-delete-action:hover { color: #fff; background: #d9485f; border-color: #d9485f; transform: translateY(-1px); }
+#tab-orders .order-more-wrap, #tab-waiting-pay .order-more-wrap, #tab-waiting-confirm .order-more-wrap { position: relative; display: inline-flex; }
+#tab-orders .order-more-trigger, #tab-waiting-pay .order-more-trigger, #tab-waiting-confirm .order-more-trigger { color: #75566a; background: #fff; border: 1px solid #eadbe4; }
+#tab-orders .order-more-trigger:hover, #tab-waiting-pay .order-more-trigger:hover, #tab-waiting-confirm .order-more-trigger:hover, #tab-orders .order-more-wrap.is-open .order-more-trigger, #tab-waiting-pay .order-more-wrap.is-open .order-more-trigger, #tab-waiting-confirm .order-more-wrap.is-open .order-more-trigger { color: #c21868; background: #fff0f7; border-color: #efb0ce; }
+.order-more-menu { display: none; position: absolute; top: calc(100% + 7px); right: 0; z-index: 80; width: 178px; padding: 5px; border: 1px solid #f0d7e3; border-radius: 12px; background: #fff; box-shadow: 0 12px 30px rgba(90, 35, 66, .16); }
+.order-more-wrap.is-open .order-more-menu { display: flex; flex-direction: column; gap: 3px; animation: order-menu-in .12s ease-out; }
+.order-more-menu button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 35px; padding: 8px 10px; border: 0; border-radius: 8px; color: #493442; background: transparent; text-align: left; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.order-more-menu button:hover { color: #c21868; background: #fff0f7; }
+.order-more-menu .menu-check { display: inline-grid; place-items: center; width: 19px; height: 19px; border-radius: 6px; color: #16845b; background: #e7f8ef; font-weight: 800; }
+.order-more-menu .menu-copy { display: inline-grid; place-items: center; width: 19px; height: 19px; color: #9a6681; font-size: 16px; }
+@keyframes order-menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+
+
+/* Order status and customer order search improvements */
+.badge.confirmed { background: #E8F7F0; color: #168653; }
+.badge.receipt-uploaded { background: #E8F7F0; color: #168653; }
+.my-orders-search { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, .45fr); gap: 8px 14px; align-items: center; margin: 0 0 18px; padding: 16px; border: 1px solid var(--border, #e8e2e2); border-radius: 14px; background: var(--surface, #fff); }
+.my-orders-search label { font-size: .88rem; font-weight: 700; }
+.my-orders-search input, .my-orders-search select { width: 100%; min-width: 0; }
+.my-orders-status-guide { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 6px; font-size: .88rem; font-weight: 700; }
+.my-orders-status-guide span:not(.status-arrow) { padding: 7px 10px; border-radius: 999px; background: #E8F7F0; color: #168653; }
+.my-orders-status-guide .status-arrow { color: #888; }
+@media (max-width: 560px) { .my-orders-search { grid-template-columns: 1fr; } .my-orders-status-guide { grid-column: 1; } }
+
+.footer-link-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.25em; margin-right: .35em; font-weight: 800; line-height: 1; }
+
+/* Premium PP Queen customer orders page */
+.my-orders-hero{min-height:132px;padding:24px 8px;background:linear-gradient(105deg,#fff4f8 0%,#fff8fb 62%,#ffe8f1 100%);border-radius:0;margin:0 -1px 18px;display:flex;align-items:center;justify-content:space-between;gap:20px}
+.my-orders-hero-copy{display:flex;align-items:center;gap:20px}.my-orders-hero h1{font-size:clamp(2rem,3.2vw,2.8rem);margin:0 0 4px;color:#14233d}.my-orders-hero p{max-width:620px;margin:0;line-height:1.55}.my-orders-hero-icon{font-size:40px;color:#f52278;font-weight:800;line-height:1}
+.my-orders-search{display:grid;grid-template-columns:minmax(240px,1fr) minmax(150px,190px) minmax(145px,170px);gap:12px;align-items:center;margin:0 0 16px;padding:10px;border:1px solid #ffd6e7;border-radius:13px;background:#fff7fa}
+.order-search-field{display:flex;align-items:center;gap:10px;min-width:0;padding:3px 4px 3px 14px;border:1px solid #eadce4;border-radius:28px;background:#fff}.order-search-field>span{font-size:24px;color:#34415b}.order-search-field input{border:0!important;box-shadow:none!important;min-width:0;padding:10px 0!important}.order-search-button{flex:0 0 auto;min-height:40px;border-radius:24px!important;padding:8px 18px!important}.my-orders-search select,.my-orders-search>input[type=date]{min-height:46px;border:1px solid #eadce4;border-radius:12px;background:#fff;padding:0 12px}
+.my-order-card{display:block;padding:0;overflow:hidden;border:1px solid #ffd6e7;border-radius:13px;background:#fff;box-shadow:0 4px 16px rgba(220,45,119,.035)}.my-orders-list{gap:14px}.order-card-top{display:grid;grid-template-columns:minmax(230px,1.15fr) minmax(255px,1.1fr) minmax(130px,.45fr) minmax(125px,.48fr);align-items:center;gap:16px;padding:15px 18px;border-bottom:1px solid #ffedf4}.order-ident{display:flex;gap:13px;align-items:flex-start;min-width:0}.order-bag-icon{font-size:31px;line-height:1;color:#f52278;font-weight:800}.order-title-line{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.order-title-line h2{font-size:1.08rem;color:#15233d;margin:0;font-weight:800}.order-item-count{background:#ffe6f0;color:#f52278;border-radius:20px;padding:4px 10px;font-size:.77rem;font-weight:800;white-space:nowrap}.order-date{margin-top:7px;color:#68768e;font-size:.79rem;overflow-wrap:anywhere}.order-status-area{min-width:0}.order-progress{display:flex;align-items:flex-start;justify-content:center;gap:0;min-width:0}.progress-step{display:flex;flex:0 0 auto;align-items:center;flex-direction:column;gap:5px;min-width:66px;color:#78849a;text-align:center;font-size:.72rem}.progress-dot{width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#cbd2dd;color:#fff;font-size:15px;font-weight:800;box-shadow:0 0 0 3px #fff}.progress-label{white-space:nowrap}.progress-line{height:2px;flex:1;min-width:10px;background:#d9dee7;margin:11px -2px 0}.progress-line.is-done{background:#f8a2c5}.progress-step.is-complete .progress-dot{background:#c5ccd7}.progress-step.is-active.step-waiting_pay{color:#ed920c}.progress-step.is-active.step-waiting_pay .progress-dot{background:#f6a11a}.progress-step.is-active.step-paid{color:#5555ef}.progress-step.is-active.step-paid .progress-dot{background:#5c5bf6}.progress-step.is-active.step-success{color:#12a95d;font-weight:800}.progress-step.is-active.step-success .progress-dot{background:#12b765}.unknown-status{font-size:.75rem;color:#7d8798;margin-left:7px}.order-total{height:100%;display:flex;flex-direction:column;justify-content:center;padding:7px 14px;border-left:1px solid #ffe0ed;background:#fff9fc;min-width:0}.order-total span{font-size:.76rem;color:#718099}.order-total strong{font-size:1.55rem;line-height:1.3;color:#f52278;white-space:nowrap}.order-actions{display:flex;flex-direction:column;gap:7px;min-width:0}.order-actions .btn{min-height:39px;display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 12px;border-radius:10px;font-size:.78rem;white-space:nowrap}.order-pay{background:#f52278;color:#fff;border:1px solid #f52278}.order-view{color:#f52278;border:1px solid #f52278;background:#fff}.order-products-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr)) minmax(100px,.9fr);gap:10px;padding:12px 18px}.order-product{min-width:0;padding:7px;border:1px solid #f4e8ee;border-radius:9px;background:#fff}.order-product-image{position:relative;display:grid;place-items:center;height:82px;margin-bottom:7px;overflow:hidden;border-radius:7px;background:#fff5f8}.order-product-image img{width:100%;height:100%;object-fit:cover}.order-image-fallback{width:100%;height:100%;place-items:center;color:#e8a0bd;font-weight:800;background:#fff5f8}.order-product-name{font-size:.73rem;color:#1d2b45;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.order-product-price{margin-top:3px;font-size:.8rem;font-weight:800;color:#1d2b45}.order-product-qty{font-size:.68rem;color:#8290a5}.order-products-grid.compact-products{grid-template-columns:repeat(10,minmax(0,1fr)) minmax(88px,.85fr);gap:7px;padding:10px 14px}.compact-products .order-product{padding:5px}.compact-products .order-product-image{height:62px}.compact-products .order-product-name{font-size:.65rem}.compact-products .order-product-price{font-size:.7rem}.compact-products .order-product-qty{font-size:.62rem}.order-view-all{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:0;border:1px solid #ffedf4;border-radius:9px;background:#fff8fb;color:#f52278;padding:10px 6px;font-size:1rem}.order-view-all span{font-size:.8rem}.order-view-all b{font-size:.72rem;font-weight:600}.order-count-note{margin:14px 2px;font-size:.78rem}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.order-items-overlay{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:20px;background:rgba(19,28,46,.45)}.order-items-modal{position:relative;width:min(900px,100%);max-height:85vh;overflow:auto;padding:24px;border-radius:16px;background:#fff;box-shadow:0 20px 70px #18223840}.order-items-modal h2{margin:0 42px 18px 0;color:#18243d}.order-modal-close{position:absolute;right:14px;top:12px;width:38px;height:38px;border:1px solid #ffd6e7;border-radius:50%;background:#fff5f9;color:#f52278;font-size:25px;cursor:pointer}.order-modal-products{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}.order-modal-total{display:flex;justify-content:space-between;margin-top:18px;padding-top:14px;border-top:1px solid #f5dce7;font-weight:700}.order-modal-total strong{font-size:1.35rem;color:#f52278}
+@media(max-width:1050px){.order-card-top{grid-template-columns:minmax(200px,1fr) minmax(230px,1fr) minmax(110px,.5fr)}.order-actions{grid-column:1/-1;flex-direction:row;justify-content:flex-end}.order-actions .btn{min-width:130px}.order-products-grid{grid-template-columns:repeat(4,minmax(0,1fr)) minmax(100px,.8fr)}.order-products-grid.compact-products{grid-template-columns:repeat(5,minmax(0,1fr)) minmax(95px,.8fr)}.compact-products .order-product:nth-of-type(n+6){display:none}}
+@media(max-width:680px){.my-orders-hero{padding:20px 14px;align-items:flex-start}.my-orders-hero-copy{gap:12px}.my-orders-hero-icon{font-size:30px}.my-orders-hero .btn{display:none}.my-orders-search{grid-template-columns:1fr;gap:9px}.order-search-field{width:100%}.order-search-button{padding:8px 12px!important}.order-card-top{grid-template-columns:1fr;gap:13px;padding:14px}.order-total{border-left:0;border-top:1px solid #ffe0ed;padding:9px 0 0;background:#fff}.order-total strong{font-size:1.4rem}.order-status-area{padding:4px 0}.order-progress{max-width:390px;margin:auto}.progress-step{flex:1;min-width:0}.progress-label{font-size:.68rem;white-space:normal}.order-actions{grid-column:auto;display:grid;grid-template-columns:1fr 1fr}.order-actions .btn{min-width:0}.order-products-grid,.order-products-grid.compact-products{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px;gap:8px}.order-product-image{height:115px}.compact-products .order-product:nth-of-type(n){display:block}.order-view-all{min-height:110px}.order-modal-products{grid-template-columns:repeat(2,minmax(0,1fr))}.order-items-modal{padding:20px 14px}}
+
+/* Admin order tables: compact product-list style. Keep admin action icons side-by-side
+   and prevent customer-facing .order-actions button styles from expanding table rows. */
+#tab-orders .table-wrap,
+#tab-waiting-pay .table-wrap,
+#tab-waiting-confirm .table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line, #f0dce6);
+  border-radius: 12px;
+  background: #fff;
+}
+#tab-orders .table-wrap table,
+#tab-waiting-pay .table-wrap table,
+#tab-waiting-confirm .table-wrap table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  font-size: .78rem;
+}
+#tab-orders .table-wrap th,
+#tab-waiting-pay .table-wrap th,
+#tab-waiting-confirm .table-wrap th {
+  padding: 11px 12px;
+  background: #fff4f8;
+  color: #8b6477;
+  font-size: .7rem;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid #f2dce6;
+}
+#tab-orders .table-wrap td,
+#tab-waiting-pay .table-wrap td,
+#tab-waiting-confirm .table-wrap td {
+  padding: 9px 12px;
+  line-height: 1.4;
+  vertical-align: middle;
+  border-bottom: 1px solid #f4eaf0;
+  overflow-wrap: anywhere;
+}
+#tab-orders .table-wrap tbody tr:last-child td,
+#tab-waiting-pay .table-wrap tbody tr:last-child td,
+#tab-waiting-confirm .table-wrap tbody tr:last-child td { border-bottom: 0; }
+#tab-orders .table-wrap tbody tr:hover,
+#tab-waiting-pay .table-wrap tbody tr:hover,
+#tab-waiting-confirm .table-wrap tbody tr:hover { background: #fff9fc; }
+#tab-orders .table-wrap th:first-child,
+#tab-waiting-pay .table-wrap th:first-child,
+#tab-waiting-confirm .table-wrap th:first-child { min-width: 105px; }
+#tab-orders .table-wrap th:last-child,
+#tab-waiting-pay .table-wrap th:last-child,
+#tab-waiting-confirm .table-wrap th:last-child { width: 94px; }
+#tab-orders .order-actions,
+#tab-waiting-pay .order-actions,
+#tab-waiting-confirm .order-actions {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 6px;
+  width: max-content;
+  min-width: 0;
+  margin: 0;
+}
+#tab-orders .order-actions .icon-action,
+#tab-waiting-pay .order-actions .icon-action,
+#tab-waiting-confirm .order-actions .icon-action {
+  display: inline-flex;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  margin: 0;
+  border-radius: 8px;
+}
+#tab-orders .order-actions .icon-action svg,
+#tab-waiting-pay .order-actions .icon-action svg,
+#tab-waiting-confirm .order-actions .icon-action svg { width: 15px; height: 15px; }
+#tab-orders .order-toolbar,
+#tab-waiting-pay .order-toolbar,
+#tab-waiting-confirm .order-toolbar { align-items: center; flex-wrap: wrap; gap: 10px; }
+@media (max-width: 600px) {
+  #tab-orders .table-wrap table,
+  #tab-waiting-pay .table-wrap table,
+  #tab-waiting-confirm .table-wrap table { min-width: 760px; }
+  #tab-orders .table-wrap th,
+  #tab-waiting-pay .table-wrap th,
+  #tab-waiting-confirm .table-wrap th,
+  #tab-orders .table-wrap td,
+  #tab-waiting-pay .table-wrap td,
+  #tab-waiting-confirm .table-wrap td { padding: 8px 10px; }
+  #tab-orders .order-toolbar h2,
+  #tab-waiting-pay .order-toolbar h2,
+  #tab-waiting-confirm .order-toolbar h2 { width: 100%; }
+}
+
+
+/* PP Queen admin order list: final compact table overrides */
+#tab-orders .table-wrap,
+#tab-waiting-pay .table-wrap,
+#tab-waiting-confirm .table-wrap {
+  display: block;
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+#tab-orders .table-wrap tbody tr,
+#tab-waiting-pay .table-wrap tbody tr,
+#tab-waiting-confirm .table-wrap tbody tr {
+  height: 48px;
+}
+#tab-orders .table-wrap td,
+#tab-waiting-pay .table-wrap td,
+#tab-waiting-confirm .table-wrap td {
+  padding: 7px 10px !important;
+  line-height: 1.25 !important;
+  vertical-align: middle !important;
+}
+#tab-orders .order-actions,
+#tab-waiting-pay .order-actions,
+#tab-waiting-confirm .order-actions {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-wrap: nowrap !important;
+  gap: 5px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+}
+#tab-orders .order-actions .icon-action,
+#tab-waiting-pay .order-actions .icon-action,
+#tab-waiting-confirm .order-actions .icon-action {
+  box-sizing: border-box !important;
+  display: inline-flex !important;
+  flex: 0 0 30px !important;
+  width: 30px !important;
+  min-width: 30px !important;
+  max-width: 30px !important;
+  height: 30px !important;
+  min-height: 30px !important;
+  max-height: 30px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 1 !important;
+}
+#tab-orders .table-wrap th:last-child,
+#tab-waiting-pay .table-wrap th:last-child,
+#tab-waiting-confirm .table-wrap th:last-child,
+#tab-orders .table-wrap td:last-child,
+#tab-waiting-pay .table-wrap td:last-child,
+#tab-waiting-confirm .table-wrap td:last-child {
+  width: 84px;
+  min-width: 84px;
+  white-space: nowrap;
+}
+#tab-orders .table-wrap td:nth-child(1),
+#tab-waiting-pay .table-wrap td:nth-child(1),
+#tab-waiting-confirm .table-wrap td:nth-child(1) { white-space: nowrap; }
+@media (max-width: 600px) {
+  #tab-orders .table-wrap table,
+  #tab-waiting-pay .table-wrap table,
+  #tab-waiting-confirm .table-wrap table { min-width: 780px; }
+  #tab-orders .table-wrap tbody tr,
+  #tab-waiting-pay .table-wrap tbody tr,
+  #tab-waiting-confirm .table-wrap tbody tr { height: 46px; }
+}
+
+/* Unified PP Queen admin table system: Products + all order views */
+#tab-products .table-wrap,
+#tab-orders .table-wrap,
+#tab-waiting-pay .table-wrap,
+#tab-waiting-confirm .table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  border: 1px solid #f1dce6;
+  border-radius: 12px;
+  background: #fff;
+  -webkit-overflow-scrolling: touch;
+}
+#tab-products .admin-products-table,
+#tab-orders .table-wrap table,
+#tab-waiting-pay .table-wrap table,
+#tab-waiting-confirm .table-wrap table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  font-size: 13px;
+  line-height: 1.3;
+}
+#tab-products .admin-products-table thead th,
+#tab-orders .table-wrap thead th,
+#tab-waiting-pay .table-wrap thead th,
+#tab-waiting-confirm .table-wrap thead th {
+  padding: 11px 12px;
+  height: 42px;
+  background: #fff1f7;
+  color: #80576b;
+  border-bottom: 1px solid #f1dce6;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#tab-products .admin-products-table tbody tr,
+#tab-orders .table-wrap tbody tr,
+#tab-waiting-pay .table-wrap tbody tr,
+#tab-waiting-confirm .table-wrap tbody tr { height: 48px; }
+#tab-products .admin-products-table tbody td,
+#tab-orders .table-wrap tbody td,
+#tab-waiting-pay .table-wrap tbody td,
+#tab-waiting-confirm .table-wrap tbody td {
+  padding: 8px 12px !important;
+  height: 48px;
+  line-height: 1.3 !important;
+  vertical-align: middle !important;
+  border-bottom: 1px solid #f5eaf0;
+}
+#tab-products .admin-products-table tbody tr:last-child td,
+#tab-orders .table-wrap tbody tr:last-child td,
+#tab-waiting-pay .table-wrap tbody tr:last-child td,
+#tab-waiting-confirm .table-wrap tbody tr:last-child td { border-bottom: 0; }
+#tab-products .admin-products-table tbody tr:hover,
+#tab-orders .table-wrap tbody tr:hover,
+#tab-waiting-pay .table-wrap tbody tr:hover,
+#tab-waiting-confirm .table-wrap tbody tr:hover { background: #fff8fb; }
+#tab-products .icon-action,
+#tab-orders .order-actions .icon-action,
+#tab-waiting-pay .order-actions .icon-action,
+#tab-waiting-confirm .order-actions .icon-action {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 30px;
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  max-height: 30px;
+  padding: 0;
+  margin: 0;
+  border-radius: 8px;
+  line-height: 1;
+}
+#tab-products .icon-action svg,
+#tab-orders .order-actions .icon-action svg,
+#tab-waiting-pay .order-actions .icon-action svg,
+#tab-waiting-confirm .order-actions .icon-action svg { width: 15px; height: 15px; }
+#tab-orders .order-actions,
+#tab-waiting-pay .order-actions,
+#tab-waiting-confirm .order-actions {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-flow: row nowrap !important;
+  gap: 5px !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+#tab-products .admin-products-table td:last-child,
+#tab-products .admin-products-table th:last-child,
+#tab-orders .table-wrap td:last-child,
+#tab-orders .table-wrap th:last-child,
+#tab-waiting-pay .table-wrap td:last-child,
+#tab-waiting-pay .table-wrap th:last-child,
+#tab-waiting-confirm .table-wrap td:last-child,
+#tab-waiting-confirm .table-wrap th:last-child { white-space: nowrap; text-align: center; }
+@media (max-width: 760px) {
+  #tab-products .admin-products-table { min-width: 620px; }
+  #tab-orders .table-wrap table,
+  #tab-waiting-pay .table-wrap table,
+  #tab-waiting-confirm .table-wrap table { min-width: 760px; }
+  #tab-products .admin-products-table thead th,
+  #tab-orders .table-wrap thead th,
+  #tab-waiting-pay .table-wrap thead th,
+  #tab-waiting-confirm .table-wrap thead th { padding: 9px 10px; }
+  #tab-products .admin-products-table tbody td,
+  #tab-orders .table-wrap tbody td,
+  #tab-waiting-pay .table-wrap tbody td,
+  #tab-waiting-confirm .table-wrap tbody td { padding: 7px 10px !important; }
 }

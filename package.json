@@ -6,8 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "db:init": "node db/init.js",
-    "migrate:images": "node scripts/migrate-images-to-supabase.js"
+    "db:init": "node db/init.js"
   },
   "engines": {
     "node": ">=18"

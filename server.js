@@ -25,9 +25,18 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// Uploaded files must always be treated as plain images by the browser
-app.use('/uploads', (req, res, next) => { res.setHeader('X-Content-Type-Options', 'nosniff'); next(); });
-app.use(express.static(path.join(__dirname, 'public')));
+// Uploaded files use unique filenames, so they can be cached by browsers/CDNs.
+// This improves repeat visits without caching HTML pages across deployments.
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+}, express.static(path.join(__dirname, 'public', 'uploads'), { maxAge: '30d', immutable: true, fallthrough: true }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: '1h',
+  setHeaders(res, filePath) {
+    if (/\.html?$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+  }
+}));
 
 // API errors (for example wrong image type) as JSON
 app.use((err, req, res, next) => {
