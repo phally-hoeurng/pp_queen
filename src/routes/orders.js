@@ -14,6 +14,16 @@ const CUR = () => process.env.CURRENCY || '$';
 const money = (n) => CUR() + Number(n).toFixed(2);
 const clip = (v, n) => String(v == null ? '' : v).trim().slice(0, n);
 
+// Base URL helper to construct links
+function getBaseUrl(req) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '');
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '');
+  const host = (req && req.get && req.get('host')) || 'pp-queen-shop.onrender.com';
+  const proto = req && (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https') ? 'https' : 'https';
+  return `${proto}://${host}`;
+}
+
 async function loadOrder(id, lang = 'en') {
   const o = await pool.query('SELECT * FROM orders WHERE id = $1', [id]);
   if (!o.rowCount) return null;
@@ -37,8 +47,6 @@ async function loadOrder(id, lang = 'en') {
   return order;
 }
 
-// Guests do not log in. Each order has a secret token; whoever holds the
-// token (the customer's browser) can see and pay that order.
 function sameToken(a, b) {
   if (!a || !b) return false;
   const x = Buffer.from(String(a));
@@ -47,7 +55,6 @@ function sameToken(a, b) {
 }
 const tokenFrom = (req) => String(req.headers['x-order-token'] || req.query.t || '');
 
-// Admin, the logged-in owner, or anyone holding the order's secret token
 function canAccess(order, req) {
   const u = req.user;
   if (u && (u.role === 'admin' || (order.user_id && order.user_id === u.id))) return true;
@@ -56,7 +63,7 @@ function canAccess(order, req) {
 
 // ---------- Customer (no login needed) ----------
 
-// Create order. Server calculates the price, the browser is never trusted.
+// 1. Create order
 router.post(
   '/',
   optionalAuth,
@@ -113,12 +120,22 @@ router.post(
       }
       await client.query('COMMIT');
 
-      sendTelegram(
-        '🛍 <b>New order ' + orderCode + '</b>\n' +
-        'Customer: ' + esc(customer_name) + '\nPhone: ' + esc(phone) + '\nAddress: ' + esc(address) + '\n' +
-        lines.map((l) => '• ' + esc(l.name) + ' x' + l.qty).join('\n') +
-        '\n<b>Total: ' + money(total) + '</b>\nStatus: waiting for payment'
-      );
+      // Admin direct search link
+      const adminOrderUrl = `${getBaseUrl(req)}/admin/index.html#orders?search=${encodeURIComponent(orderCode)}`;
+      const productLines = lines.map((l) => ' . ' + esc(l.name) + '  ' + l.qty).join('\n');
+
+      const newOrderMsg =
+        '🛍 <b>New order ID: ' + esc(orderCode) + '</b>\n' +
+        'Customer: ' + esc(customer_name) + '\n' +
+        'Phone: ' + esc(phone) + '\n' +
+        'Address: ' + esc(address) + '\n' +
+        'Product:\n' + productLines + '\n\n' +
+        'Total: <b>' + money(total) + '</b>\n' +
+        'Status: waiting for payment\n' +
+        '<a href="' + adminOrderUrl + '">👉 View order: ' + esc(orderCode) + '</a>';
+
+      sendTelegram(newOrderMsg);
+
       res.status(201).json({ id: orderId, order_code: orderCode, total, status: 'waiting_pay', token });
     } catch (err) {
       await client.query('ROLLBACK').catch(() => { });
@@ -129,7 +146,7 @@ router.post(
   }
 );
 
-// Orders of a logged-in account (admin/old customer accounts)
+// Orders of a logged-in account
 router.get('/mine', requireAuth, async (req, res) => {
   const r = await pool.query(
     `SELECT o.id, o.order_code, o.total, o.status, o.created_at,
@@ -154,8 +171,7 @@ router.get('/mine', requireAuth, async (req, res) => {
   })));
 });
 
-// "My orders" for guests: the browser sends the orders it remembers
-// ([{id, token}]) and gets back their current status.
+// "My orders" for guests
 router.post(
   '/lookup',
   rateLimit({ windowMs: 60 * 1000, max: 30, key: (req) => 'lookup:' + req.ip }),
@@ -216,7 +232,6 @@ router.get('/:id(\\d+)', optionalAuth, async (req, res) => {
   }
 });
 
-// Check the order BEFORE saving the file, so strangers can not fill the disk
 async function guardOrder(req, res, next) {
   try {
     const order = await loadOrder(req.params.id, req.query.lang || 'en');
@@ -230,7 +245,7 @@ async function guardOrder(req, res, next) {
   }
 }
 
-// Customer uploads the payment screenshot.
+// 2. Customer uploads payment screenshot
 router.post(
   '/:id(\\d+)/screenshot',
   optionalAuth,
@@ -258,26 +273,41 @@ router.post(
         const order = req.order;
         if (!req.file) return res.status(400).json({ error: 'Choose a JPG, PNG, WebP image or PDF payment proof.' });
 
-        // Persist payment proof to Supabase Storage before DB update
-        const tempPath = req.file.path;
+        const orderCode = order.order_code || ('PP' + String(order.id).padStart(3, '0'));
+        const adminOrderUrl = `${getBaseUrl(req)}/admin/index.html#orders?search=${encodeURIComponent(orderCode)}`;
+
+        // Formats products with dot and quantity
+        const productLines = (order.items || []).map((i) => ' . ' + esc(i.name) + '  ' + (i.qty || 1)).join('\n');
+
+        const telegramCaption =
+          '🛍 <b>order ID: ' + esc(orderCode) + '</b>\n' +
+          'Customer: ' + esc(order.customer_name) + '\n' +
+          'Phone: ' + esc(order.phone) + '\n' +
+          'Address: ' + esc(order.address) + '\n' +
+          'Product:\n' + productLines + '\n\n' +
+          'Total: <b>' + money(order.total) + '</b>\n' +
+          'Status: waiting for confirm\n' +
+          '<a href="' + adminOrderUrl + '">👉 View order: ' + esc(orderCode) + '</a>';
+
+        const localPath = req.file.path;
+
+        // 1. Upload to Supabase Storage
         await persistUploadedFiles([req.file], 'payments');
         const proofRef = req.file.filename;
+        const proofUrl = storedFileUrl(proofRef);
 
+        // 2. Update database record
         await pool.query("UPDATE orders SET payment_screenshot = $1, status = 'paid' WHERE id = $2", [proofRef, order.id]);
 
-        // Clean up previous screenshot if customer uploaded a replacement
+        // 3. Clean up previous screenshot if replacing
         if (order.payment_screenshot) {
           await deleteStoredFile(order.payment_screenshot).catch(() => { });
         }
 
-        const telegramSent = await sendTelegramPhoto(
-          tempPath,
-          '📸 <b>Payment proof' + (order.payment_screenshot ? ' (new one)' : '') + '</b>\n' +
-          'Order ' + (order.order_code || ('PP' + String(order.id).padStart(3, '0'))) + '  •  <b>' + money(order.total) + '</b>\n' +
-          'Customer: ' + esc(order.customer_name) + '\nPhone: ' + esc(order.phone) + '\n' +
-          'Please check it and press “Confirm order” in Admin > Waiting Confirm.'
-        );
-        res.json({ ok: true, url: storedFileUrl(proofRef), telegramSent });
+        // 4. Send photo directly to Telegram with clickable link
+        const telegramSent = await sendTelegramPhoto(proofUrl || localPath, telegramCaption);
+
+        res.json({ ok: true, url: proofUrl, telegramSent });
       } catch (err) {
         if (req.file && req.file.path) await fs.promises.unlink(req.file.path).catch(() => { });
         console.error(err);

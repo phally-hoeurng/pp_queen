@@ -8,6 +8,16 @@ const router = express.Router();
 const TOKEN_RE = /^[a-f0-9]{32}$/;
 const clip = (v, n) => String(v == null ? '' : v).replace(/\r\n/g, '\n').trim().slice(0, n);
 
+// Base URL helper for clickable links in Telegram
+function getBaseUrl(req) {
+  if (process.env.APP_BASE_URL) return process.env.APP_BASE_URL.replace(/\/+$/, '');
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/+$/, '');
+  if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL.replace(/\/+$/, '');
+  const host = (req && req.get && req.get('host')) || 'pp-queen-shop.onrender.com';
+  const proto = req && (req.protocol === 'https' || req.get('x-forwarded-proto') === 'https') ? 'https' : 'https';
+  return `${proto}://${host}`;
+}
+
 // ---------- Customer (no login, identified by a random token in the browser) ----------
 
 function chatToken(req, res, next) {
@@ -17,32 +27,36 @@ function chatToken(req, res, next) {
   next();
 }
 
-// Send an alert for every customer message. The previous one-minute
-// throttle silently suppressed later messages in active conversations.
-async function alertAdmin(chat, body, imageUrl, productId) {
-  const base = String(process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://pp-queen-shop.onrender.com').replace(/\/$/, '');
-  const actualBody = imageUrl ? (body ? body.slice(0, 850) + '\n[Image attached]\n' + imageUrl : 'Image message\n' + imageUrl) : (body || (productId ? 'Product ID: ' + productId : 'New message'));
+async function alertAdmin(chat, body, imageUrl, productId, req) {
+  const base = getBaseUrl(req);
+  const actualBody = imageUrl
+    ? (body ? body.slice(0, 850) + '\n[Image attached]\n' + imageUrl : 'Image message\n' + imageUrl)
+    : (body || (productId ? 'Product ID: ' + productId : 'New message'));
+
+  const adminChatUrl = `${base}/admin/index.html#chat?id=${chat.id}`;
+
   const message =
     '💬 <b>New chat message</b>\n' +
     'From: ' + esc(chat.customer_name || 'Customer') + '\n' +
     'Message: ' + esc(actualBody.slice(0, 1000)) + (productId && !actualBody.includes(productId) ? '\nProduct ID: ' + esc(productId) : '') + '\n\n' +
-    '<a href="' + esc(base + '/admin/index.html?tab=chat&chatId=' + chat.id) + '">Reply in Admin &gt; Chat</a>';
+    '<a href="' + adminChatUrl + '">👉 Reply in Admin &gt; Chat</a>';
+
   const sent = await sendTelegram(message);
-  if (!sent) console.error('Telegram customer chat alert was not delivered. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID and the Telegram API response.');
+  if (!sent) console.error('Telegram customer chat alert was not delivered. Check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.');
   return sent;
 }
 
 router.get('/messages', chatToken, async (req, res) => {
   try {
     const after = parseInt(req.query.after, 10) || 0;
-    const c = await pool.query('SELECT id FROM chats WHERE token = $1', [req.chatToken]);
-    if (!c.rowCount) return res.json({ messages: [] });
+    const c = await pool.query('SELECT id, customer_name FROM chats WHERE token = $1', [req.chatToken]);
+    if (!c.rowCount) return res.json({ messages: [], customer_name: '' });
     const m = await pool.query(
       'SELECT id, sender, body, image_url, created_at FROM chat_messages WHERE chat_id = $1 AND id > $2 ORDER BY id LIMIT 200',
       [c.rows[0].id, after]
     );
     if (req.query.read === '1') await pool.query('UPDATE chats SET customer_unread = 0 WHERE id = $1', [c.rows[0].id]);
-    res.json({ messages: m.rows });
+    res.json({ messages: m.rows, customer_name: c.rows[0].customer_name || '' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not load messages.' });
@@ -58,13 +72,20 @@ router.post(
     try {
       const body = clip(req.body && req.body.body, 1000);
       const name = clip(req.body && req.body.name, 60);
+
       if (!body) return res.status(400).json({ error: 'Please type a message before sending.' });
+
       const existing = await pool.query('SELECT id, customer_name FROM chats WHERE token = $1', [req.chatToken]);
-      if (!name && (!existing.rowCount || !String(existing.rows[0].customer_name || '').trim())) {
-        return res.status(400).json({ error: 'Please enter your name before starting the chat.' });
+      const currentName = existing.rowCount ? String(existing.rows[0].customer_name || '').trim() : '';
+
+      // Customer name is required if not set before
+      const resolvedName = name || currentName;
+      if (!resolvedName) {
+        return res.status(400).json({ error: 'Please enter your name to start chat.' });
       }
 
       const productId = clip((req.body && req.body.productId) || ((req.get('referer') || '').match(/\bPP\d{2,}/i) || [])[0] || (body.match(/\bPP\d{2,}/i) || [])[0] || '', 32);
+
       const c = await pool.query(
         `INSERT INTO chats (token, customer_name, admin_unread, customer_unread, last_message_at)
          VALUES ($1, $2, 1, 0, NOW())
@@ -74,17 +95,16 @@ router.post(
            last_message_at = NOW(),
            customer_name = CASE WHEN EXCLUDED.customer_name <> '' THEN EXCLUDED.customer_name ELSE chats.customer_name END
          RETURNING id, customer_name, (xmax = 0) AS created`,
-        [req.chatToken, name]
+        [req.chatToken, resolvedName]
       );
       const chat = c.rows[0];
       const m = await pool.query(
         "INSERT INTO chat_messages (chat_id, sender, body) VALUES ($1, 'customer', $2) RETURNING id, sender, body, created_at",
         [chat.id, body]
       );
-      // Save and acknowledge the message first. Telegram outages must never
-      // make the customer composer appear to fail after the message is stored.
-      res.status(201).json(m.rows[0]);
-      alertAdmin(chat, body, null, productId).catch((err) => console.error('Telegram chat alert failed:', err.message));
+
+      res.status(201).json({ ...m.rows[0], customer_name: chat.customer_name });
+      alertAdmin(chat, body, null, productId, req).catch((err) => console.error('Telegram chat alert failed:', err.message));
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'Could not send message.' });
@@ -111,7 +131,6 @@ router.delete('/messages/:messageId(\\d+)', chatToken, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Could not delete message.' }); }
 });
 
-// Customer deletion clears only chat messages and preserves the customer/chat record.
 router.delete('/conversation', chatToken, async (req, res) => {
   try {
     const c = await pool.query('SELECT id FROM chats WHERE token = $1', [req.chatToken]);
@@ -122,7 +141,6 @@ router.delete('/conversation', chatToken, async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Could not clear conversation.' }); }
 });
 
-// Customer unread count is scoped to this browser's private chat token.
 router.get('/unread', chatToken, async (req, res) => {
   try {
     const r = await pool.query('SELECT customer_unread FROM chats WHERE token = $1', [req.chatToken]);
@@ -197,7 +215,7 @@ router.put('/admin/:id(\\d+)/messages/:messageId(\\d+)', requireAdmin, async (re
   } catch (err) { console.error(err); res.status(500).json({ error: 'Could not edit message.' }); }
 });
 
-router.delete('/admin/:id(\\d+)/messages/:messageId(\\d+)', requireAdmin, async (req, res) => {
+router.delete('/admin/:id(\\d+)', requireAdmin, async (req, res) => {
   try {
     const r = await pool.query(`DELETE FROM chat_messages WHERE chat_id = $1 AND id = $2 AND sender = 'admin' RETURNING id`, [req.params.id, req.params.messageId]);
     if (!r.rowCount) return res.status(404).json({ error: 'Admin message not found.' });

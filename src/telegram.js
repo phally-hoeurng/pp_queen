@@ -2,23 +2,34 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
-const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.pdf': 'application/pdf' };
+const MIME = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.pdf': 'application/pdf'
+};
 
-// Sends a message to Telegram. It never throws, so a Telegram problem
-// can not break an order.
+// Sends a message to Telegram. Never throws.
 async function sendTelegram(text) {
   const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID || process.env.TG_CHAT_ID;
   if (!token || !chatId) return false;
   try {
-    const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true })
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      })
     });
     const payload = await res.json().catch(() => null);
     if (!res.ok || !payload || payload.ok !== true) {
-      console.error('Telegram sendMessage error:', res.status, payload && payload.description ? payload.description : 'Unknown Telegram API response');
+      console.error('Telegram sendMessage error:', res.status, payload?.description || 'Unknown error');
       return false;
     }
     return true;
@@ -28,33 +39,73 @@ async function sendTelegram(text) {
   }
 }
 
-// Sends the picture itself to Telegram with a caption (used for payment
-// screenshots). If Telegram refuses it as a photo (very tall/large image)
-// it is sent as a file instead; if that fails too, a text alert is sent.
-// It never throws.
-async function sendTelegramPhoto(filePath, caption) {
+// Sends the picture to Telegram with caption.
+// Accepts either a local file path OR a remote public URL (e.g. Supabase Storage URL).
+async function sendTelegramPhoto(target, caption) {
   const token = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID || process.env.TG_CHAT_ID;
-  if (!token || !chatId) return false;
+  if (!token || !chatId || !target) return false;
+
+  // 1. If target is a remote Supabase URL, send via Telegram URL fetching (most reliable)
+  if (typeof target === 'string' && (target.startsWith('http://') || target.startsWith('https://'))) {
+    const isPdf = /\.pdf(?:$|[?#])/i.test(target);
+    const method = isPdf ? 'sendDocument' : 'sendPhoto';
+    const field = isPdf ? 'document' : 'photo';
+
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          [field]: target,
+          caption,
+          parse_mode: 'HTML'
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) return true;
+      console.error(`Telegram remote URL ${method} failed:`, data?.description || res.status);
+    } catch (e) {
+      console.error('Telegram URL send error:', e.message);
+    }
+  }
+
+  // 2. If target is a local file path on disk, send as multipart form-data
   try {
-    const buf = await fs.promises.readFile(filePath);
-    const name = path.basename(filePath);
-    const type = MIME[path.extname(name).toLowerCase()] || 'application/octet-stream';
-    const attempts = [['sendPhoto', 'photo'], ['sendDocument', 'document']];
-    for (const [method, field] of attempts) {
-      const fd = new FormData();
-      fd.append('chat_id', String(chatId));
-      fd.append('caption', caption);
-      fd.append('parse_mode', 'HTML');
-      fd.append(field, new Blob([buf], { type }), name);
-      const res = await fetch('https://api.telegram.org/bot' + token + '/' + method, { method: 'POST', body: fd });
-      if (res.ok) return true;
-      console.error('Telegram ' + method + ' error:', res.status, await res.text());
+    if (typeof target === 'string' && fs.existsSync(target)) {
+      const buf = await fs.promises.readFile(target);
+      const name = path.basename(target);
+      const ext = path.extname(name).toLowerCase();
+      const type = MIME[ext] || 'application/octet-stream';
+      const isPdf = ext === '.pdf';
+
+      const attempts = isPdf 
+        ? [['sendDocument', 'document']] 
+        : [['sendPhoto', 'photo'], ['sendDocument', 'document']];
+
+      for (const [method, field] of attempts) {
+        const fd = new FormData();
+        fd.append('chat_id', String(chatId));
+        fd.append('caption', caption);
+        fd.append('parse_mode', 'HTML');
+        fd.append(field, new Blob([buf], { type }), name);
+
+        const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+          method: 'POST',
+          body: fd
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.ok) return true;
+        console.error(`Telegram file ${method} failed:`, data?.description || res.status);
+      }
     }
   } catch (err) {
-    console.error('Telegram photo failed:', err.message);
+    console.error('Telegram local file send failed:', err.message);
   }
-  return sendTelegram(caption + '\n(The image could not be attached. Open it in Admin > Orders.)');
+
+  // Fallback text if image could not be delivered
+  return sendTelegram(caption);
 }
 
 // Escape user text for Telegram HTML mode
