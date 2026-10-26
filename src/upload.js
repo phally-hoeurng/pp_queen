@@ -27,7 +27,7 @@ const upload = multer({
 });
 const paymentProofUpload = multer({
   storage,
-  fileFilter: (req, file, cb) => PROOF_EXT[file.mimetype] ? cb(null, true) : cb(new Error('Payment proof must be JPG, JPEG, PNG, WebP or PDF.')) ,
+  fileFilter: (req, file, cb) => PROOF_EXT[file.mimetype] ? cb(null, true) : cb(new Error('Payment proof must be JPG, JPEG, PNG, WebP or PDF.')),
   limits: { fileSize: 8 * 1024 * 1024, files: 1 }
 });
 

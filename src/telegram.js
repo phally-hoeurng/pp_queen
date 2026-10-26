@@ -80,8 +80,8 @@ async function sendTelegramPhoto(target, caption) {
       const type = MIME[ext] || 'application/octet-stream';
       const isPdf = ext === '.pdf';
 
-      const attempts = isPdf 
-        ? [['sendDocument', 'document']] 
+      const attempts = isPdf
+        ? [['sendDocument', 'document']]
         : [['sendPhoto', 'photo'], ['sendDocument', 'document']];
 
       for (const [method, field] of attempts) {

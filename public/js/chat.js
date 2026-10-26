@@ -23,38 +23,38 @@
   root.id = 'chat-root';
   root.innerHTML =
     '<button type="button" class="chat-fab" id="chat-fab" aria-label="Chat with us">' +
-      '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>' +
-      '<span class="chat-dot hidden" id="chat-dot">0</span>' +
+    '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>' +
+    '<span class="chat-dot hidden" id="chat-dot">0</span>' +
     '</button>' +
     '<section class="chat-panel hidden" id="chat-panel" role="dialog" aria-label="Chat with us">' +
-      '<header class="chat-head">' +
-        '<img src="/images/logo-mark.png" alt="">' +
-        '<div><b>Chat with PP Queen</b><small>We usually reply within a few minutes.</small></div>' +
-        '<button type="button" class="chat-clear" id="chat-clear" title="Delete chat" aria-label="Delete chat">▤</button>' +
-        '<button type="button" class="chat-close" id="chat-close" aria-label="Close">×</button>' +
-      '</header>' +
-      '<div class="chat-body" id="chat-body">' +
-        '<div class="msg admin"><div class="bubble">Hi! 👋 Ask us anything about products, delivery or your payment.</div></div>' +
-        '<div class="chat-chips" id="chat-chips">' +
-          '<button type="button">Where is my order?</button>' +
-          '<button type="button">I need help with payment</button>' +
-          '<button type="button">Is this item in stock?</button>' +
-          '<button type="button">How much is delivery?</button><button type="button">I want to check my order</button>' +
-        '</div>' +
-      '</div>' +
-      '<div class="chat-err hidden" id="chat-err"></div>' +
-      '<div class="chat-name" id="chat-name-row"><input id="chat-name" maxlength="60" placeholder="Your name (required)" autocomplete="name" required></div>' +
-      '<form class="chat-form" id="chat-form">' +
-        '<input id="chat-input" maxlength="1000" placeholder="Type your message..." autocomplete="off" aria-label="Type your message" required>' +
-        '<button class="chat-send" id="chat-send" type="submit" aria-label="Send message" title="Send message"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>' +
-      '</form>' +
+    '<header class="chat-head">' +
+    '<img src="/images/logo-mark.png" alt="">' +
+    '<div><b>Chat with PP Queen</b><small>We usually reply within a few minutes.</small></div>' +
+    '<button type="button" class="chat-clear" id="chat-clear" title="Delete chat" aria-label="Delete chat">▤</button>' +
+    '<button type="button" class="chat-close" id="chat-close" aria-label="Close">×</button>' +
+    '</header>' +
+    '<div class="chat-body" id="chat-body">' +
+    '<div class="msg admin"><div class="bubble">Hi! 👋 Ask us anything about products, delivery or your payment.</div></div>' +
+    '<div class="chat-chips" id="chat-chips">' +
+    '<button type="button">Where is my order?</button>' +
+    '<button type="button">I need help with payment</button>' +
+    '<button type="button">Is this item in stock?</button>' +
+    '<button type="button">How much is delivery?</button><button type="button">I want to check my order</button>' +
+    '</div>' +
+    '</div>' +
+    '<div class="chat-err hidden" id="chat-err"></div>' +
+    '<div class="chat-name" id="chat-name-row"><input id="chat-name" maxlength="60" placeholder="Your name (required)" autocomplete="name" required></div>' +
+    '<form class="chat-form" id="chat-form">' +
+    '<input id="chat-input" maxlength="1000" placeholder="Type your message..." autocomplete="off" aria-label="Type your message" required>' +
+    '<button class="chat-send" id="chat-send" type="submit" aria-label="Send message" title="Send message"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>' +
+    '</form>' +
     '</section>';
   document.body.appendChild(root);
 
   var $ = function (id) { return document.getElementById(id); };
   var fab = $('chat-fab'), panel = $('chat-panel'), body = $('chat-body'), input = $('chat-input'),
-      form = $('chat-form'), sendBtn = $('chat-send'), dot = $('chat-dot'), err = $('chat-err'),
-      nameRow = $('chat-name-row'), nameInput = $('chat-name'), chips = $('chat-chips');
+    form = $('chat-form'), sendBtn = $('chat-send'), dot = $('chat-dot'), err = $('chat-err'),
+    nameRow = $('chat-name-row'), nameInput = $('chat-name'), chips = $('chat-chips');
 
   try { nameInput.value = localStorage.getItem(K_NAME) || (PP.customer().name || ''); } catch (e) { /* ignore */ }
   nameInput.required = true;
